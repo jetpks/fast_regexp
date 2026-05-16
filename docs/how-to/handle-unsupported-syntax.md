@@ -50,9 +50,31 @@ the stdlib `::Regexp` to a library that only accepts core Ruby regexes.
 
 ## Force a specific backend
 
-There is no "force fast" or "force stdlib" knob. The intent is that callers
-don't think about it. If you need to assert that a hot-path pattern is on
-the fast engine, check `#fast?` in a test:
+Pass `backend:` to opt out of the auto-selection.
+
+```ruby
+Fast::Regexp.new('\w+', backend: :fast)
+# => raises ArgumentError if rust/regex can't compile this pattern.
+
+Fast::Regexp.new('foo(?=bar)', backend: :stdlib)
+# => skips the rust/regex compile attempt and goes straight to ::Regexp.
+
+Fast::Regexp.new('\w+')                         # :auto (default)
+Fast::Regexp.new('\w+', backend: :auto)         # explicit auto
+```
+
+| Value      | Behaviour                                                                 |
+| ---------- | ------------------------------------------------------------------------- |
+| `:auto`    | Try rust/regex; fall back to `::Regexp` if it rejects the pattern.        |
+| `:fast`    | Compile with rust/regex only. Raises `ArgumentError` on unsupported syntax. |
+| `:stdlib`  | Compile with `::Regexp` only — never try rust/regex.                      |
+
+Use `:fast` on hot paths where you want a noisy failure if someone adds a
+pattern that would silently drop to the stdlib engine. Use `:stdlib` to
+bypass the rust compile attempt entirely (e.g. when you already know the
+pattern uses backrefs and want to skip the wasted work).
+
+You can also keep the default `:auto` and assert the choice in a test:
 
 ```ruby
 RSpec.describe "regex hot path" do

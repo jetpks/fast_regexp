@@ -9,16 +9,20 @@ path) or stdlib `::Regexp` (fallback). The public API is identical on both.
 
 ## Constructor
 
-### `Fast::Regexp.new(pattern, unicode: true)`
+### `Fast::Regexp.new(pattern, backend: :auto, unicode: true)`
 
 Compile a pattern.
 
 | Parameter   | Type                     | Default | Description |
 | ----------- | ------------------------ | ------- | ----------- |
 | `pattern`   | `String` or `::Regexp`   | —       | Source pattern. `::Regexp` flags are translated to inline form (`(?i)`, `(?x)`, `(?s)`) for the fast path. |
-| `unicode:`  | `Boolean`                | `true`  | rust/regex's unicode awareness. Ignored on stdlib fallback. |
+| `backend:`  | `:auto`, `:fast`, `:stdlib` | `:auto` | Force a specific engine. `:auto` tries rust/regex and falls back to `::Regexp`; `:fast` raises if rust/regex rejects the pattern; `:stdlib` skips rust/regex entirely. |
+| `unicode:`  | `Boolean`                | `true`  | rust/regex's unicode awareness. Ignored on the stdlib path. |
 
-**Raises** `ArgumentError` if the pattern is malformed in both engines.
+**Raises** `ArgumentError` if the pattern is malformed in both engines
+(`:auto`), if rust/regex rejects the pattern (`:fast`), or if `backend:`
+isn't one of the recognized values. **Raises** `RegexpError` if `:stdlib`
+is forced and the pattern is malformed in Ruby's engine.
 
 **Returns** a `Fast::Regexp`. Use `#fast?` / `#stdlib?` to learn which
 backend ended up handling it.

@@ -46,11 +46,17 @@ module Fast
 
     attr_reader :pattern, :backend
 
+    BACKENDS = %i[auto fast stdlib].freeze
+
     # Internal — use `Fast::Regexp.new`. `original` is the unmodified input
     # (String or ::Regexp) so we can build an accurate stdlib fallback.
-    def initialize(pattern, original: pattern, **opts)
+    # `backend:` forces a specific engine: `:auto` (default) tries rust/regex
+    # and falls back to stdlib, `:fast` raises if rust/regex rejects the
+    # pattern, `:stdlib` skips rust/regex entirely.
+    def initialize(pattern, original: pattern, backend: :auto, **opts)
+      raise ArgumentError, "backend must be one of #{BACKENDS.inspect}" unless BACKENDS.include?(backend)
       @pattern = pattern
-      @backend = compile_backend(pattern, original, opts)
+      @backend = compile_backend(pattern, original, backend, opts)
     end
 
     def fast? = @backend.is_a?(Native)
@@ -178,17 +184,22 @@ module Fast
       count
     end
 
-    def compile_backend(pattern, original, opts)
+    def compile_backend(pattern, original, backend, opts)
+      return compile_stdlib(pattern, original) if backend == :stdlib
       Native._native_new(pattern, **opts)
     rescue ArgumentError => e
+      raise if backend == :fast
+      compile_stdlib(pattern, original, fallback_from: e)
+    end
+
+    def compile_stdlib(pattern, original, fallback_from: nil)
       return original if original.is_a?(::Regexp)
-      begin
-        ::Regexp.new(pattern)
-      rescue ::RegexpError
-        # Pattern is malformed in both engines — surface the original
-        # rust/regex error so the user sees the more detailed message.
-        raise ArgumentError, e.message
-      end
+      ::Regexp.new(pattern)
+    rescue ::RegexpError => e
+      # Pattern is malformed in both engines (auto path) — surface the
+      # original rust/regex error since it's typically more detailed.
+      # Otherwise propagate the stdlib error as-is.
+      raise(fallback_from ? ArgumentError.new(fallback_from.message) : e)
     end
 
     # Maps positional capture indices to names for the stdlib backend so we

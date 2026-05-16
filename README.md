@@ -155,6 +155,14 @@ slow.match?("foobar")  # => true
 / `#stdlib` accessors. Replacement templates use rust/regex syntax (`$1`,
 `${name}`, `$$`) on both paths; the stdlib fallback translates them for you.
 
+You can force a specific engine via the `backend:` kwarg:
+
+```ruby
+Fast::Regexp.new('\w+', backend: :fast)     # rust/regex only; raises on unsupported
+Fast::Regexp.new(pat,   backend: :stdlib)   # skip rust/regex; use ::Regexp directly
+Fast::Regexp.new('\w+', backend: :auto)     # default — try rust, fall back on reject
+```
+
 > [!NOTE]
 > The fast path is byte-based (rust/regex's `regex::bytes`), so `#=~` returns
 > a *byte* offset. The stdlib fallback path returns the byte offset too, for
