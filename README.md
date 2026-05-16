@@ -202,6 +202,16 @@ rake spec     # run tests
 
 Bug reports and pull requests are welcome on GitHub at https://github.com/jetpks/fast_regexp.
 
+## Credits
+
+`fast_regexp` is a fork of
+[`rust_regexp`](https://github.com/ocvit/rust_regexp) by Dmytro Horoshko —
+huge thanks for the original bindings and the clean magnus integration that
+made this work easy to extend. This fork rebrands the gem, reshapes the
+public API (`Fast::Regexp`, real `MatchData`, `sub`/`gsub`, `===`/`=~`,
+`Regexp`-constructor coercion), and releases the GVL around regex execution
+for thread/fiber-friendly matching.
+
 ## License
 
 The gem is available as open source under the terms of the [MIT License](https://opensource.org/licenses/MIT).

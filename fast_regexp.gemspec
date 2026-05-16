@@ -5,8 +5,8 @@ require_relative "lib/fast_regexp/version"
 Gem::Specification.new do |spec|
   spec.name = "fast_regexp"
   spec.version = Fast::Regexp::VERSION
-  spec.authors = ["Dmytro Horoshko", "Eric Jacobs"]
-  spec.email = ["electric.molfar@gmail.com"]
+  spec.authors = ["Eric Jacobs", "Dmytro Horoshko"]
+  spec.email = ["eric@ebj.dev"]
 
   spec.summary = "Fast regex for Ruby, backed by rust/regex"
   spec.description = "Ruby bindings to rust/regex with a Fast::Regexp API: MatchData, sub/gsub, ===, =~, named captures, and GVL release for thread/fiber-friendly matching."
