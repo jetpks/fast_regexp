@@ -34,6 +34,15 @@ module Fast
         allocate.tap { |re| re.send(:initialize, translated, original: pattern, **opts) }
       end
 
+      # Bulk-compile a symbol-keyed hash of patterns. Handy for defining a set
+      # of regex constants in one shot:
+      #
+      #   RE = Fast::Regexp.create_many(word: '\w+', num: '\d+').freeze
+      #   RE[:word].match("hello")
+      def create_many(**patterns)
+        patterns.transform_values { |pat| new(pat) }
+      end
+
       private
 
       def translate_regexp(regexp)
