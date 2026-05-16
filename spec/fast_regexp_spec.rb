@@ -71,6 +71,36 @@ RSpec.describe Fast::Regexp do
     end
   end
 
+  describe "backend: kwarg" do
+    it "defaults to :auto" do
+      expect(described_class.new('\w+')).to be_fast
+      expect(described_class.new('(?=x)x')).to be_stdlib
+    end
+
+    it "with backend: :fast raises instead of falling back" do
+      expect { described_class.new('(?=x)x', backend: :fast) }.to raise_error(ArgumentError)
+    end
+
+    it "with backend: :fast still compiles supported patterns on rust/regex" do
+      re = described_class.new('\w+', backend: :fast)
+      expect(re).to be_fast
+    end
+
+    it "with backend: :stdlib skips rust/regex even for supported patterns" do
+      re = described_class.new('\w+', backend: :stdlib)
+      expect(re).to be_stdlib
+      expect(re.match?("hello")).to be true
+    end
+
+    it "with backend: :stdlib propagates RegexpError for malformed patterns" do
+      expect { described_class.new('(', backend: :stdlib) }.to raise_error(::RegexpError)
+    end
+
+    it "rejects unknown backend values" do
+      expect { described_class.new('\w+', backend: :nope) }.to raise_error(ArgumentError, /backend must be/)
+    end
+  end
+
   describe "#match" do
     it "returns nil on no match" do
       expect(described_class.new('\d+').match("abc")).to be_nil

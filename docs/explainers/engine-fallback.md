@@ -94,6 +94,22 @@ unsupported pattern.
   Forces consumers to deal with the divergence themselves; the original
   motivation for this rewrite was the friction from that posture.
 
+## Overriding the choice
+
+The auto-selection is the default, but you can force a specific backend
+when needed:
+
+```ruby
+Fast::Regexp.new('\w+', backend: :fast)     # rust/regex only; raise on unsupported
+Fast::Regexp.new(pat,   backend: :stdlib)   # ::Regexp only; skip the rust attempt
+```
+
+`:fast` is useful on hot paths where you want a loud failure if someone
+introduces a pattern that would quietly fall back. `:stdlib` saves the
+wasted rust-compile attempt when you already know the pattern uses
+features rust/regex doesn't support. The default remains `:auto` —
+designed for callers who don't want to think about it.
+
 ## Escape hatches
 
 When you need the underlying engine object (passing to a library that
