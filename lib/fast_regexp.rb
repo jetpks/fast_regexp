@@ -45,13 +45,21 @@ module Fast
         allocate.tap { |re| re.send(:initialize, translated, original: pattern, **opts) }
       end
 
-      # Bulk-compile a symbol-keyed hash of patterns. Handy for defining a set
-      # of regex constants in one shot:
+      # Bulk-compile a set of patterns. Two call shapes:
       #
-      #   RE = Fast::Regexp.create_many(word: '\w+', num: '\d+').freeze
-      #   RE[:word].match("hello")
-      def create_many(**patterns)
-        patterns.transform_values { |pat| new(pat) }
+      #   Fast::Regexp.create_many(word: '\w+', num: '\d+')
+      #   # => { word: #<Fast::Regexp ...>, num: #<Fast::Regexp ...> }
+      #
+      #   Fast::Regexp.create_many('\w+', '\d+')
+      #   # => [#<Fast::Regexp ...>, #<Fast::Regexp ...>]
+      #
+      # Mixing the two raises ArgumentError — pick one shape per call.
+      def create_many(*patterns, **named)
+        if !patterns.empty? && !named.empty?
+          raise ArgumentError, "create_many accepts positional patterns OR keyword patterns, not both"
+        end
+        return named.transform_values { |pat| new(pat) } if patterns.empty?
+        patterns.map { |pat| new(pat) }
       end
 
       private

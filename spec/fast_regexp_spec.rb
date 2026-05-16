@@ -126,12 +126,24 @@ RSpec.describe Fast::Regexp do
       expect(re[:num].match("abc 42")[0]).to eq "42"
     end
 
+    it "compiles positional patterns into an array of Fast::Regexp" do
+      re = described_class.create_many('\w+', '\d+')
+      expect(re).to all(be_a(described_class))
+      expect(re.map { |r| r.match("abc 42")[0] }).to eq ["abc", "42"]
+    end
+
     it "returns an empty hash when given no patterns" do
       expect(described_class.create_many).to eq({})
     end
 
+    it "raises ArgumentError when mixing positional and keyword patterns" do
+      expect { described_class.create_many('\w+', num: '\d+') }
+        .to raise_error(ArgumentError, /positional .* OR keyword/)
+    end
+
     it "propagates compile errors with the offending pattern's context" do
       expect { described_class.create_many(ok: '\w+', bad: '(') }.to raise_error(ArgumentError)
+      expect { described_class.create_many('\w+', '(') }.to raise_error(ArgumentError)
     end
   end
 

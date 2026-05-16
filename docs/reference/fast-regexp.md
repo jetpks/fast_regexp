@@ -27,22 +27,23 @@ is forced and the pattern is malformed in Ruby's engine.
 **Returns** a `Fast::Regexp`. Use `#fast?` / `#stdlib?` to learn which
 backend ended up handling it.
 
-### `Fast::Regexp.create_many(**patterns) → Hash{Symbol => Fast::Regexp}`
+### `Fast::Regexp.create_many(*patterns, **named) → Array<Fast::Regexp> | Hash{Symbol => Fast::Regexp}`
 
-Bulk-compile a symbol-keyed hash of patterns. Convenient for declaring a set
-of regex constants in one shot.
+Bulk-compile a set of patterns. Two call shapes:
 
 ```ruby
-RE = Fast::Regexp.create_many(
-  word: '\w+',
-  num:  '\d+',
-).freeze
-
+# Keyword form — returns a symbol-keyed hash. Handy for named constants.
+RE = Fast::Regexp.create_many(word: '\w+', num: '\d+').freeze
 RE[:word].match("hello")
+
+# Positional form — returns an array, preserving order.
+patterns = Fast::Regexp.create_many('\w+', '\d+')
+patterns.first.match("hello")
 ```
 
-Each pattern is compiled with `Fast::Regexp.new(pat)` (default options). For
-per-pattern options, call `.new` directly.
+Mixing positional and keyword args in the same call raises `ArgumentError`.
+Each pattern is compiled with `Fast::Regexp.new(pat)` (default options);
+for per-pattern options call `.new` directly.
 
 ## Instance methods
 
