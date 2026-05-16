@@ -96,5 +96,3 @@ for the "how to spot it."
 
 - [Migrate from stdlib `::Regexp`](../how-to/migrate-from-stdlib-regexp.md)
 - [`Fast::Regexp` reference](../reference/fast-regexp.md)
-- [Concurrency and GVL release](../explainers/concurrency-and-gvl.md) — how
-  this gem stays friendly to threads and the fiber scheduler.

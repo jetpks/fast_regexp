@@ -72,7 +72,6 @@ name = "fast_regexp"
 version = "0.1.0"
 dependencies = [
  "magnus",
- "rb-sys",
  "regex",
 ]
 

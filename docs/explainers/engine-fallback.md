@@ -6,11 +6,10 @@ type: explanation
 
 ## The problem
 
-rust/regex is fast, has linear-time matching guarantees, and releases the
-GVL during execution — but it deliberately omits features that prevent
-those guarantees: lookaround, backreferences, and possessive quantifiers,
-among others. Ruby's stdlib `::Regexp` supports those features but is
-slower and holds the GVL for the duration of a match.
+rust/regex is fast and has linear-time matching guarantees — but it
+deliberately omits features that prevent those guarantees: lookaround,
+backreferences, and possessive quantifiers, among others. Ruby's stdlib
+`::Regexp` supports those features but is slower.
 
 A real-world codebase usually has a handful of "stdlib-only" patterns mixed
 in with hundreds of patterns that rust/regex would happily handle. Forcing
@@ -131,7 +130,5 @@ porous on purpose — the goal is "you don't have to think about it," not
 
 ## See also
 
-- [Concurrency and GVL release](concurrency-and-gvl.md) — why the fast path
-  is friendly to threads and fibers.
 - [`Fast::Regexp` reference](../reference/fast-regexp.md)
 - [Handle patterns rust/regex can't compile](../how-to/handle-unsupported-syntax.md)
