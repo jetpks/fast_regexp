@@ -1,5 +1,5 @@
 [package]
-name = "rust_regexp"
+name = "fast_regexp"
 version = "0.1.0"
 edition = "2021"
 

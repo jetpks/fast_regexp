@@ -4,8 +4,8 @@ require "bundler/gem_tasks"
 
 require "rake/extensiontask"
 
-Rake::ExtensionTask.new("rust_regexp") do |c|
-  c.lib_dir = "lib/rust_regexp"
+Rake::ExtensionTask.new("fast_regexp") do |c|
+  c.lib_dir = "lib/fast_regexp"
 end
 
 require "rspec/core/rake_task"

@@ -1,6 +1,6 @@
 # frozen_string_literal: true
 
-require "rust_regexp"
+require "fast_regexp"
 
 RSpec.configure do |config|
   config.mock_with :rspec do |mocks|

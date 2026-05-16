@@ -1,6 +1,6 @@
 # frozen_string_literal: true
 
-RSpec.describe RustRegexp::Set do
+RSpec.describe Fast::Regexp::Set do
   describe ".new" do
     it "returns a compiled set" do
       set = described_class.new(["abc", "def", "xyz"])

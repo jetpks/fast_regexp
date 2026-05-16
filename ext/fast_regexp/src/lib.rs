@@ -90,7 +90,7 @@ fn type_error(message: impl Into<String>) -> Error {
 
 type CaptureOffset = Option<(usize, usize)>;
 
-/// Inner state shared between a compiled regex and any [`RustMatchData`] it
+/// Inner state shared between a compiled regex and any [`FastMatchData`] it
 /// produces — wrapped in `Arc` so positions, names, and haystack bytes can be
 /// shared cheaply across many matches (e.g. from `#scan_matches`).
 struct RegexInner {
@@ -126,10 +126,10 @@ impl RegexInner {
     }
 }
 
-#[magnus::wrap(class = "RustRegexp", free_immediately, size)]
-pub struct RustRegexp(Arc<RegexInner>);
+#[magnus::wrap(class = "Fast::Regexp", free_immediately, size)]
+pub struct FastRegexp(Arc<RegexInner>);
 
-impl RustRegexp {
+impl FastRegexp {
     pub fn new(args: &[Value]) -> Result<Self, Error> {
         let args = scan_args::<(String,), (), (), (), RHash, ()>(args)?;
         let kwargs = get_kwargs::<_, (), (Option<bool>,), ()>(args.keywords, &[], &["unicode"])?;
@@ -145,15 +145,15 @@ impl RustRegexp {
         &self,
         haystack: Arc<Vec<u8>>,
         offsets: Vec<CaptureOffset>,
-    ) -> RustMatchData {
-        RustMatchData {
+    ) -> FastMatchData {
+        FastMatchData {
             haystack,
             captures: offsets,
             inner: self.0.clone(),
         }
     }
 
-    pub fn rmatch(&self, haystack: RString) -> Option<RustMatchData> {
+    pub fn rmatch(&self, haystack: RString) -> Option<FastMatchData> {
         let regex = &self.0.regex;
         let bytes = haystack_bytes(&haystack);
 
@@ -299,8 +299,8 @@ impl RustRegexp {
     }
 }
 
-#[magnus::wrap(class = "RustRegexp::MatchData", free_immediately, size)]
-pub struct RustMatchData {
+#[magnus::wrap(class = "Fast::Regexp::MatchData", free_immediately, size)]
+pub struct FastMatchData {
     haystack: Arc<Vec<u8>>,
     /// Index 0 is the whole match. Subsequent entries are capture groups in
     /// order; `None` indicates a group that did not participate.
@@ -308,7 +308,7 @@ pub struct RustMatchData {
     inner: Arc<RegexInner>,
 }
 
-impl RustMatchData {
+impl FastMatchData {
     fn slice(&self, ruby: &Ruby, range: (usize, usize)) -> RString {
         utf8_string(ruby, &self.haystack[range.0..range.1])
     }
@@ -455,14 +455,14 @@ impl RustMatchData {
     pub fn inspect(ruby: &Ruby, rb_self: &Self) -> RString {
         let (s, e) = rb_self.whole();
         let matched = String::from_utf8_lossy(&rb_self.haystack[s..e]);
-        ruby.str_new(&format!("#<RustRegexp::MatchData {:?}>", matched))
+        ruby.str_new(&format!("#<Fast::Regexp::MatchData {:?}>", matched))
     }
 }
 
-#[magnus::wrap(class = "RustRegexp::Set", free_immediately, size)]
-pub struct RustRegexpSet(RegexSet);
+#[magnus::wrap(class = "Fast::Regexp::Set", free_immediately, size)]
+pub struct FastRegexpSet(RegexSet);
 
-impl RustRegexpSet {
+impl FastRegexpSet {
     pub fn new(args: &[Value]) -> Result<Self, Error> {
         let args = scan_args::<(Vec<String>,), (), (), (), RHash, ()>(args)?;
         let kwargs = get_kwargs::<_, (), (Option<bool>,), ()>(args.keywords, &[], &["unicode"])?;
@@ -499,43 +499,44 @@ impl RustRegexpSet {
 #[magnus::init]
 pub fn init(ruby: &Ruby) -> Result<(), Error> {
     let object_class = ruby.class_object();
-    let regexp_class = ruby.define_class("RustRegexp", object_class)?;
+    let fast_module = ruby.define_module("Fast")?;
+    let regexp_class = fast_module.define_class("Regexp", object_class)?;
 
-    regexp_class.define_singleton_method("_native_new", function!(RustRegexp::new, -1))?;
-    regexp_class.define_method("_native_match", method!(RustRegexp::rmatch, 1))?;
-    regexp_class.define_method("match?", method!(RustRegexp::is_match, 1))?;
-    regexp_class.define_method("scan", method!(RustRegexp::scan, 1))?;
-    regexp_class.define_method("scan_matches", method!(RustRegexp::scan_matches, 1))?;
-    regexp_class.define_method("pattern", method!(RustRegexp::pattern, 0))?;
-    regexp_class.define_method("captures_count", method!(RustRegexp::captures_count, 0))?;
-    regexp_class.define_method("names", method!(RustRegexp::names, 0))?;
-    regexp_class.define_method("_native_sub", method!(RustRegexp::sub_str, 3))?;
-    regexp_class.define_method("_native_gsub", method!(RustRegexp::gsub_str, 3))?;
+    regexp_class.define_singleton_method("_native_new", function!(FastRegexp::new, -1))?;
+    regexp_class.define_method("_native_match", method!(FastRegexp::rmatch, 1))?;
+    regexp_class.define_method("match?", method!(FastRegexp::is_match, 1))?;
+    regexp_class.define_method("scan", method!(FastRegexp::scan, 1))?;
+    regexp_class.define_method("scan_matches", method!(FastRegexp::scan_matches, 1))?;
+    regexp_class.define_method("pattern", method!(FastRegexp::pattern, 0))?;
+    regexp_class.define_method("captures_count", method!(FastRegexp::captures_count, 0))?;
+    regexp_class.define_method("names", method!(FastRegexp::names, 0))?;
+    regexp_class.define_method("_native_sub", method!(FastRegexp::sub_str, 3))?;
+    regexp_class.define_method("_native_gsub", method!(FastRegexp::gsub_str, 3))?;
 
     let match_data_class = regexp_class.define_class("MatchData", object_class)?;
-    match_data_class.define_method("[]", method!(RustMatchData::aref, 1))?;
-    match_data_class.define_method("to_a", method!(RustMatchData::to_a, 0))?;
-    match_data_class.define_method("captures", method!(RustMatchData::captures, 0))?;
-    match_data_class.define_method("named_captures", method!(RustMatchData::named_captures, 0))?;
-    match_data_class.define_method("names", method!(RustMatchData::names, 0))?;
-    match_data_class.define_method("size", method!(RustMatchData::size, 0))?;
-    match_data_class.define_method("length", method!(RustMatchData::size, 0))?;
-    match_data_class.define_method("pre_match", method!(RustMatchData::pre_match, 0))?;
-    match_data_class.define_method("post_match", method!(RustMatchData::post_match, 0))?;
-    match_data_class.define_method("match", method!(RustMatchData::whole_match, 0))?;
-    match_data_class.define_method("to_s", method!(RustMatchData::whole_match, 0))?;
-    match_data_class.define_method("string", method!(RustMatchData::string, 0))?;
-    match_data_class.define_method("byteoffset", method!(RustMatchData::byteoffset, 1))?;
-    match_data_class.define_method("byte_begin", method!(RustMatchData::byte_begin, 1))?;
-    match_data_class.define_method("byte_end", method!(RustMatchData::byte_end, 1))?;
-    match_data_class.define_method("inspect", method!(RustMatchData::inspect, 0))?;
+    match_data_class.define_method("[]", method!(FastMatchData::aref, 1))?;
+    match_data_class.define_method("to_a", method!(FastMatchData::to_a, 0))?;
+    match_data_class.define_method("captures", method!(FastMatchData::captures, 0))?;
+    match_data_class.define_method("named_captures", method!(FastMatchData::named_captures, 0))?;
+    match_data_class.define_method("names", method!(FastMatchData::names, 0))?;
+    match_data_class.define_method("size", method!(FastMatchData::size, 0))?;
+    match_data_class.define_method("length", method!(FastMatchData::size, 0))?;
+    match_data_class.define_method("pre_match", method!(FastMatchData::pre_match, 0))?;
+    match_data_class.define_method("post_match", method!(FastMatchData::post_match, 0))?;
+    match_data_class.define_method("match", method!(FastMatchData::whole_match, 0))?;
+    match_data_class.define_method("to_s", method!(FastMatchData::whole_match, 0))?;
+    match_data_class.define_method("string", method!(FastMatchData::string, 0))?;
+    match_data_class.define_method("byteoffset", method!(FastMatchData::byteoffset, 1))?;
+    match_data_class.define_method("byte_begin", method!(FastMatchData::byte_begin, 1))?;
+    match_data_class.define_method("byte_end", method!(FastMatchData::byte_end, 1))?;
+    match_data_class.define_method("inspect", method!(FastMatchData::inspect, 0))?;
 
     let regexp_set_class = regexp_class.define_class("Set", object_class)?;
 
-    regexp_set_class.define_singleton_method("new", function!(RustRegexpSet::new, -1))?;
-    regexp_set_class.define_method("match", method!(RustRegexpSet::matches, 1))?;
-    regexp_set_class.define_method("match?", method!(RustRegexpSet::is_match, 1))?;
-    regexp_set_class.define_method("patterns", method!(RustRegexpSet::patterns, 0))?;
+    regexp_set_class.define_singleton_method("new", function!(FastRegexpSet::new, -1))?;
+    regexp_set_class.define_method("match", method!(FastRegexpSet::matches, 1))?;
+    regexp_set_class.define_method("match?", method!(FastRegexpSet::is_match, 1))?;
+    regexp_set_class.define_method("patterns", method!(FastRegexpSet::patterns, 0))?;
 
     Ok(())
 }

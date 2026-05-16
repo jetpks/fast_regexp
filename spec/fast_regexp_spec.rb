@@ -1,8 +1,8 @@
 # frozen_string_literal: true
 
-RSpec.describe RustRegexp do
+RSpec.describe Fast::Regexp do
   it "has a version number" do
-    expect(RustRegexp::VERSION).not_to be nil
+    expect(Fast::Regexp::VERSION).not_to be nil
   end
 
   describe ".new" do
@@ -189,7 +189,7 @@ RSpec.describe RustRegexp do
       re = described_class.new('\w+')
       expect(re.pattern).to eq '\w+'
       expect(re.to_s).to eq '\w+'
-      expect(re.inspect).to eq '#<RustRegexp "\\\\w+">'
+      expect(re.inspect).to eq '#<Fast::Regexp "\\\\w+">'
     end
   end
 
