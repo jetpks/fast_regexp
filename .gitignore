@@ -16,3 +16,4 @@ Gemfile.lock
 .vscode
 
 /ext/fast_regexp/target/
+/target/

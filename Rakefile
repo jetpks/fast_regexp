@@ -1,11 +1,15 @@
 # frozen_string_literal: true
 
 require "bundler/gem_tasks"
+require "rb_sys/extensiontask"
 
-require "rake/extensiontask"
+GEMSPEC = Gem::Specification.load("fast_regexp.gemspec")
 
-Rake::ExtensionTask.new("fast_regexp") do |c|
-  c.lib_dir = "lib/fast_regexp"
+# rb_sys/extensiontask wraps rake-compiler with cross-compilation tasks.
+# CI (oxidize-rb/cross-gem-action) sets RUBY_TARGET to drive cross builds;
+# locally, `rake compile` and `rake build` do the host build.
+RbSys::ExtensionTask.new("fast_regexp", GEMSPEC) do |ext|
+  ext.lib_dir = "lib/fast_regexp"
 end
 
 require "rspec/core/rake_task"

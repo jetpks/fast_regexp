@@ -1,0 +1,3 @@
+[workspace]
+members = ["ext/fast_regexp"]
+resolver = "2"

@@ -18,7 +18,14 @@ Gem::Specification.new do |spec|
     "source_code_uri" => "https://github.com/jetpks/fast_regexp"
   }
 
-  spec.files = Dir["lib/**/*.rb", "ext/fast_regexp/src/**/*.rs", "ext/fast_regexp/*.{toml,lock,rb}", "README.md", "LICENSE.txt"]
+  spec.files = Dir[
+    "lib/**/*.rb",
+    "ext/fast_regexp/src/**/*.rs",
+    "ext/fast_regexp/*.{toml,rb}",
+    "Cargo.{toml,lock}",
+    "README.md",
+    "LICENSE.txt"
+  ]
   spec.bindir = "exe"
   spec.executables = spec.files.grep(%r{\Aexe/}) { |f| File.basename(f) }
   spec.require_paths = ["lib"]
