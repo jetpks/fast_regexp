@@ -21,12 +21,53 @@ RSpec.describe Fast::Regexp do
       expect(re.match?("foo\nbar")).to be true
     end
 
-    it "raises ArgumentError for invalid patterns" do
+    it "raises ArgumentError for invalid patterns (rejected by both engines)" do
       expect { described_class.new('(') }.to raise_error(ArgumentError)
     end
 
-    it "raises ArgumentError for unsupported features (lookaround)" do
-      expect { described_class.new('(?=foo)') }.to raise_error(ArgumentError)
+    it "falls back to ::Regexp for unsupported features (lookaround)" do
+      re = described_class.new('foo(?=bar)')
+      expect(re).to be_stdlib
+      expect(re).not_to be_fast
+      expect(re.match?("foobar")).to be true
+      expect(re.match?("foobaz")).to be false
+    end
+
+    it "falls back to ::Regexp for backreferences" do
+      re = described_class.new('(\w+) \1')
+      expect(re).to be_stdlib
+      expect(re.match?("hi hi")).to be true
+      expect(re.match?("hi bye")).to be false
+    end
+  end
+
+  describe "fallback API" do
+    it "exposes #fast? / #stdlib? and #native / #stdlib for direct access" do
+      fast = described_class.new('\w+')
+      slow = described_class.new('(?=x)x')
+
+      expect(fast).to be_fast
+      expect(fast.native).to be_a(Fast::Regexp::Native)
+      expect(fast.stdlib).to be_nil
+
+      expect(slow).to be_stdlib
+      expect(slow.stdlib).to be_a(::Regexp)
+      expect(slow.native).to be_nil
+    end
+
+    it "returns Fast::Regexp::MatchData regardless of backend" do
+      m = described_class.new('foo(?=bar)').match("foobar")
+      expect(m).to be_a(Fast::Regexp::MatchData)
+      expect(m).to be_stdlib
+      expect(m[0]).to eq "foo"
+      expect(m.stdlib).to be_a(::MatchData)
+    end
+
+    it "supports sub/gsub on the stdlib path with rust-style templates" do
+      re = described_class.new('(?<g>\w+)(?=:)')
+      expect(re).to be_stdlib
+      expect(re.sub("ruby:123", '<${g}>')).to eq "<ruby>:123"
+      expect(re.gsub("a:1 b:2", '[$1]')).to eq "[a]:1 [b]:2"
     end
   end
 

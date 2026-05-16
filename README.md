@@ -3,7 +3,9 @@
 [![Gem Version](https://badge.fury.io/rb/fast_regexp.svg)](https://badge.fury.io/rb/fast_regexp)
 [![Test](https://github.com/jetpks/fast_regexp/workflows/CI/badge.svg)](https://github.com/jetpks/fast_regexp/actions)
 
-Ruby bindings for [rust/regex](https://docs.rs/regex/latest/regex/) library.
+Fast, drop-in regex for Ruby — backed by [rust/regex](https://docs.rs/regex/latest/regex/) with transparent fallback to the stdlib `::Regexp` engine for features rust/regex doesn't support (lookaround, backreferences, possessive quantifiers, etc.).
+
+You get rust/regex's speed and GVL-releasing matching on the common path, and a single uniform API (`Fast::Regexp`, `Fast::Regexp::MatchData`) regardless of which engine actually ran underneath.
 
 ## Installation
 
@@ -128,11 +130,42 @@ Fast::Regexp.new('(?P<n>\w+)').names        # => ["n"]
 Fast::Regexp.new('(a)(b)').captures_count   # => 2
 ```
 
+### Engine fallback
+
+rust/regex doesn't support lookaround, backreferences, or possessive
+quantifiers. Rather than make you manage two regex libraries, `Fast::Regexp`
+silently falls back to stdlib `::Regexp` when it sees something rust/regex
+can't compile. The public API (`#match`, `#sub`, `#gsub`, `#===`, `#=~`,
+`MatchData`) is identical on both paths, so callers don't have to care which
+engine ran — but you can inspect or reach the underlying object when you
+need to:
+
+```ruby
+fast = Fast::Regexp.new('\w+')
+fast.fast?       # => true
+fast.native      # => #<Fast::Regexp::Native ...>  (rust-backed)
+
+slow = Fast::Regexp.new('foo(?=bar)')   # lookahead — rust/regex rejects
+slow.stdlib?     # => true
+slow.stdlib      # => /foo(?=bar)/  (the real ::Regexp)
+slow.match?("foobar")  # => true
+```
+
+`Fast::Regexp::MatchData` exposes the same `#native?` / `#stdlib?` / `#native`
+/ `#stdlib` accessors. Replacement templates use rust/regex syntax (`$1`,
+`${name}`, `$$`) on both paths; the stdlib fallback translates them for you.
+
+> [!NOTE]
+> The fast path is byte-based (rust/regex's `regex::bytes`), so `#=~` returns
+> a *byte* offset. The stdlib fallback path returns the byte offset too, for
+> API consistency.
+
 > [!WARNING]
-> `rust/regex` regular expression syntax differs from Ruby's built-in
-> [`Regexp`](https://docs.ruby-lang.org/en/3.4/Regexp.html) library, see the
-> [official syntax page](https://docs.rs/regex/latest/regex/index.html#syntax) for more
-> details.
+> `rust/regex` syntax differs from Ruby's built-in
+> [`Regexp`](https://docs.ruby-lang.org/en/3.4/Regexp.html) — see the
+> [rust/regex syntax page](https://docs.rs/regex/latest/regex/index.html#syntax).
+> When fallback kicks in, your pattern is interpreted by stdlib `::Regexp`
+> instead, so Ruby's syntax applies for that compile.
 
 ### Searching simultaneously
 
@@ -176,11 +209,11 @@ It also supports parsing of strings with invalid UTF-8 characters by default. It
 In case unicode awarness of matchers should be disabled, both `Fast::Regexp` and `Fast::Regexp::Set` support `unicode: false` option:
 
 ```ruby
-Fast::Regexp.new('\w+').match('ю٤夏')
-# => ["ю٤夏"]
+Fast::Regexp.new('\w+').match('ю٤夏')[0]
+# => "ю٤夏"
 
 Fast::Regexp.new('\w+', unicode: false).match('ю٤夏')
-# => []
+# => nil
 
 Fast::Regexp::Set.new(['\w', '\d', '\s']).match("ю٤\u2000")
 # => [0, 1, 2]
@@ -188,6 +221,16 @@ Fast::Regexp::Set.new(['\w', '\d', '\s']).match("ю٤\u2000")
 Fast::Regexp::Set.new(['\w', '\d', '\s'], unicode: false).match("ю٤\u2000")
 # => []
 ```
+
+## Documentation
+
+In-depth docs live under [`docs/`](docs/README.md), organized via the
+[Diátaxis](https://diataxis.fr/) framework:
+
+- **Tutorial:** [Getting started](docs/tutorials/getting-started.md)
+- **How-to:** [Migrate from stdlib `::Regexp`](docs/how-to/migrate-from-stdlib-regexp.md), [Handle unsupported syntax](docs/how-to/handle-unsupported-syntax.md)
+- **Reference:** [`Fast::Regexp`](docs/reference/fast-regexp.md), [`MatchData`](docs/reference/fast-regexp-matchdata.md), [`Set`](docs/reference/fast-regexp-set.md)
+- **Explainers:** [Engine fallback](docs/explainers/engine-fallback.md), [Concurrency and GVL](docs/explainers/concurrency-and-gvl.md)
 
 ## Development
 
@@ -209,8 +252,9 @@ Bug reports and pull requests are welcome on GitHub at https://github.com/jetpks
 huge thanks for the original bindings and the clean magnus integration that
 made this work easy to extend. This fork rebrands the gem, reshapes the
 public API (`Fast::Regexp`, real `MatchData`, `sub`/`gsub`, `===`/`=~`,
-`Regexp`-constructor coercion), and releases the GVL around regex execution
-for thread/fiber-friendly matching.
+`Regexp`-constructor coercion), releases the GVL around regex execution for
+thread/fiber-friendly matching, and adds transparent fallback to stdlib
+`::Regexp` for patterns rust/regex can't compile.
 
 ## License
 

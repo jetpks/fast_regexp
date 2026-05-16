@@ -2,7 +2,7 @@ use magnus::{
     function, method,
     scan_args::{get_kwargs, scan_args},
     value::ReprValue,
-    Error, Module, Object, RArray, RHash, RString, Ruby, Symbol, TryConvert, Value,
+    Error, Module, Object, RArray, RClass, RHash, RString, Ruby, Symbol, TryConvert, Value,
 };
 use regex::bytes::{NoExpand, Regex, RegexBuilder, RegexSet, RegexSetBuilder};
 use std::collections::HashMap;
@@ -126,7 +126,7 @@ impl RegexInner {
     }
 }
 
-#[magnus::wrap(class = "Fast::Regexp", free_immediately, size)]
+#[magnus::wrap(class = "Fast::Regexp::Native", free_immediately, size)]
 pub struct FastRegexp(Arc<RegexInner>);
 
 impl FastRegexp {
@@ -299,7 +299,7 @@ impl FastRegexp {
     }
 }
 
-#[magnus::wrap(class = "Fast::Regexp::MatchData", free_immediately, size)]
+#[magnus::wrap(class = "Fast::Regexp::Native::MatchData", free_immediately, size)]
 pub struct FastMatchData {
     haystack: Arc<Vec<u8>>,
     /// Index 0 is the whole match. Subsequent entries are capture groups in
@@ -499,8 +499,12 @@ impl FastRegexpSet {
 #[magnus::init]
 pub fn init(ruby: &Ruby) -> Result<(), Error> {
     let object_class = ruby.class_object();
-    let fast_module = ruby.define_module("Fast")?;
-    let regexp_class = fast_module.define_class("Regexp", object_class)?;
+    // Fast::Regexp must already be defined as a class by lib/fast_regexp.rb
+    // before this extension is required — the Ruby façade owns that constant
+    // and delegates to the Native class registered below.
+    let fast_module: magnus::RModule = object_class.const_get("Fast")?;
+    let regexp_facade: RClass = fast_module.const_get("Regexp")?;
+    let regexp_class = regexp_facade.define_class("Native", object_class)?;
 
     regexp_class.define_singleton_method("_native_new", function!(FastRegexp::new, -1))?;
     regexp_class.define_method("_native_match", method!(FastRegexp::rmatch, 1))?;
@@ -531,7 +535,8 @@ pub fn init(ruby: &Ruby) -> Result<(), Error> {
     match_data_class.define_method("byte_end", method!(FastMatchData::byte_end, 1))?;
     match_data_class.define_method("inspect", method!(FastMatchData::inspect, 0))?;
 
-    let regexp_set_class = regexp_class.define_class("Set", object_class)?;
+    // Set stays at Fast::Regexp::Set (no fallback; rust/regex RegexSet is the only backend).
+    let regexp_set_class = regexp_facade.define_class("Set", object_class)?;
 
     regexp_set_class.define_singleton_method("new", function!(FastRegexpSet::new, -1))?;
     regexp_set_class.define_method("match", method!(FastRegexpSet::matches, 1))?;
