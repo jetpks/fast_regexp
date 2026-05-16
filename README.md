@@ -5,7 +5,7 @@
 
 Fast, drop-in regex for Ruby — backed by [rust/regex](https://docs.rs/regex/latest/regex/) with transparent fallback to the stdlib `::Regexp` engine for features rust/regex doesn't support (lookaround, backreferences, possessive quantifiers, etc.).
 
-You get rust/regex's speed and GVL-releasing matching on the common path, and a single uniform API (`Fast::Regexp`, `Fast::Regexp::MatchData`) regardless of which engine actually ran underneath.
+You get rust/regex's speed on the common path, and a single uniform API (`Fast::Regexp`, `Fast::Regexp::MatchData`) regardless of which engine actually ran underneath.
 
 ## Installation
 
@@ -238,7 +238,7 @@ In-depth docs live under [`docs/`](docs/README.md), organized via the
 - **Tutorial:** [Getting started](docs/tutorials/getting-started.md)
 - **How-to:** [Migrate from stdlib `::Regexp`](docs/how-to/migrate-from-stdlib-regexp.md), [Handle unsupported syntax](docs/how-to/handle-unsupported-syntax.md)
 - **Reference:** [`Fast::Regexp`](docs/reference/fast-regexp.md), [`MatchData`](docs/reference/fast-regexp-matchdata.md), [`Set`](docs/reference/fast-regexp-set.md)
-- **Explainers:** [Engine fallback](docs/explainers/engine-fallback.md), [Concurrency and GVL](docs/explainers/concurrency-and-gvl.md)
+- **Explainers:** [Engine fallback](docs/explainers/engine-fallback.md)
 
 ## Development
 
@@ -260,8 +260,7 @@ Bug reports and pull requests are welcome on GitHub at https://github.com/jetpks
 huge thanks for the original bindings and the clean magnus integration that
 made this work easy to extend. This fork rebrands the gem, reshapes the
 public API (`Fast::Regexp`, real `MatchData`, `sub`/`gsub`, `===`/`=~`,
-`Regexp`-constructor coercion), releases the GVL around regex execution for
-thread/fiber-friendly matching, and adds transparent fallback to stdlib
+`Regexp`-constructor coercion), and adds transparent fallback to stdlib
 `::Regexp` for patterns rust/regex can't compile.
 
 ## License

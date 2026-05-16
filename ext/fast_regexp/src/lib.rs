@@ -6,67 +6,9 @@ use magnus::{
 };
 use regex::bytes::{NoExpand, Regex, RegexBuilder, RegexSet, RegexSetBuilder};
 use std::collections::HashMap;
-use std::ffi::c_void;
-use std::ptr;
 use std::sync::Arc;
 
-/// Skip GVL release for haystacks smaller than this — the release/reacquire
-/// overhead (~µs) dwarfs the cost of a regex match on a tiny string.
-const GVL_RELEASE_THRESHOLD: usize = 1024;
-
-/// Run `func` with the GVL released so other Ruby threads (and the fiber
-/// scheduler on its host thread) can make progress during a long regex match.
-///
-/// The callback runs on the same OS thread — `Send` is not required, and the
-/// borrow checker enforces that any references stay valid for the call.
-fn without_gvl<F, R>(func: F) -> R
-where
-    F: FnOnce() -> R,
-{
-    struct Pack<F, R> {
-        func: Option<F>,
-        result: Option<R>,
-    }
-
-    unsafe extern "C" fn trampoline<F, R>(data: *mut c_void) -> *mut c_void
-    where
-        F: FnOnce() -> R,
-    {
-        let pack = &mut *(data as *mut Pack<F, R>);
-        let func = pack.func.take().expect("trampoline called twice");
-        pack.result = Some(func());
-        ptr::null_mut()
-    }
-
-    let mut pack: Pack<F, R> = Pack {
-        func: Some(func),
-        result: None,
-    };
-    unsafe {
-        rb_sys::rb_thread_call_without_gvl(
-            Some(trampoline::<F, R>),
-            &mut pack as *mut _ as *mut c_void,
-            None,
-            ptr::null_mut(),
-        );
-    }
-    pack.result.take().expect("callback did not run")
-}
-
-fn run_regex<F, R>(haystack_len: usize, func: F) -> R
-where
-    F: FnOnce() -> R,
-{
-    if haystack_len >= GVL_RELEASE_THRESHOLD {
-        without_gvl(func)
-    } else {
-        func()
-    }
-}
-
 fn haystack_bytes(haystack: &RString) -> Vec<u8> {
-    // Copy out of the Ruby heap so the bytes are safe to read after the GVL is
-    // released (Ruby 4's compacting GC can otherwise move the string).
     unsafe { haystack.as_slice() }.to_vec()
 }
 
@@ -157,12 +99,10 @@ impl FastRegexp {
         let regex = &self.0.regex;
         let bytes = haystack_bytes(&haystack);
 
-        let offsets = run_regex(bytes.len(), || {
-            regex.captures(&bytes).map(|caps| {
-                (0..regex.captures_len())
-                    .map(|i| caps.get(i).map(|m| (m.start(), m.end())))
-                    .collect::<Vec<_>>()
-            })
+        let offsets = regex.captures(&bytes).map(|caps| {
+            (0..regex.captures_len())
+                .map(|i| caps.get(i).map(|m| (m.start(), m.end())))
+                .collect::<Vec<_>>()
         })?;
 
         Some(self.build_match_data(Arc::new(bytes), offsets))
@@ -173,29 +113,25 @@ impl FastRegexp {
         let bytes = haystack_bytes(&haystack);
 
         if regex.captures_len() == 1 {
-            let ranges: Vec<(usize, usize)> = run_regex(bytes.len(), || {
-                regex
-                    .find_iter(&bytes)
-                    .map(|m| (m.start(), m.end()))
-                    .collect()
-            });
+            let ranges: Vec<(usize, usize)> = regex
+                .find_iter(&bytes)
+                .map(|m| (m.start(), m.end()))
+                .collect();
             let result = ruby.ary_new_capa(ranges.len());
             for (s, e) in ranges {
                 result.push(utf8_string(ruby, &bytes[s..e]))?;
             }
             Ok(result)
         } else {
-            let groups: Vec<Vec<CaptureOffset>> = run_regex(bytes.len(), || {
-                regex
-                    .captures_iter(&bytes)
-                    .map(|caps| {
-                        caps.iter()
-                            .skip(1)
-                            .map(|c| c.map(|m| (m.start(), m.end())))
-                            .collect()
-                    })
-                    .collect()
-            });
+            let groups: Vec<Vec<CaptureOffset>> = regex
+                .captures_iter(&bytes)
+                .map(|caps| {
+                    caps.iter()
+                        .skip(1)
+                        .map(|c| c.map(|m| (m.start(), m.end())))
+                        .collect()
+                })
+                .collect();
             let result = ruby.ary_new_capa(groups.len());
             for group_ranges in groups {
                 let group = ruby.ary_new_capa(group_ranges.len());
@@ -216,16 +152,14 @@ impl FastRegexp {
         let bytes = haystack_bytes(&haystack);
         let n_groups = regex.captures_len();
 
-        let all: Vec<Vec<CaptureOffset>> = run_regex(bytes.len(), || {
-            regex
-                .captures_iter(&bytes)
-                .map(|caps| {
-                    (0..n_groups)
-                        .map(|i| caps.get(i).map(|m| (m.start(), m.end())))
-                        .collect()
-                })
-                .collect()
-        });
+        let all: Vec<Vec<CaptureOffset>> = regex
+            .captures_iter(&bytes)
+            .map(|caps| {
+                (0..n_groups)
+                    .map(|i| caps.get(i).map(|m| (m.start(), m.end())))
+                    .collect()
+            })
+            .collect();
 
         let shared = Arc::new(bytes);
         let result = ruby.ary_new_capa(all.len());
@@ -238,7 +172,7 @@ impl FastRegexp {
     pub fn is_match(&self, haystack: RString) -> bool {
         let regex = &self.0.regex;
         let bytes = haystack_bytes(&haystack);
-        run_regex(bytes.len(), || regex.is_match(&bytes))
+        regex.is_match(&bytes)
     }
 
     pub fn sub_str(
@@ -251,13 +185,11 @@ impl FastRegexp {
         let regex = &rb_self.0.regex;
         let bytes = haystack_bytes(&haystack);
         let repl = haystack_bytes(&replacement);
-        let out = run_regex(bytes.len(), || -> Vec<u8> {
-            if literal {
-                regex.replace(&bytes, NoExpand(&repl)).into_owned()
-            } else {
-                regex.replace(&bytes, &repl[..]).into_owned()
-            }
-        });
+        let out: Vec<u8> = if literal {
+            regex.replace(&bytes, NoExpand(&repl)).into_owned()
+        } else {
+            regex.replace(&bytes, &repl[..]).into_owned()
+        };
         utf8_string(ruby, &out)
     }
 
@@ -271,13 +203,11 @@ impl FastRegexp {
         let regex = &rb_self.0.regex;
         let bytes = haystack_bytes(&haystack);
         let repl = haystack_bytes(&replacement);
-        let out = run_regex(bytes.len(), || -> Vec<u8> {
-            if literal {
-                regex.replace_all(&bytes, NoExpand(&repl)).into_owned()
-            } else {
-                regex.replace_all(&bytes, &repl[..]).into_owned()
-            }
-        });
+        let out: Vec<u8> = if literal {
+            regex.replace_all(&bytes, NoExpand(&repl)).into_owned()
+        } else {
+            regex.replace_all(&bytes, &repl[..]).into_owned()
+        };
         utf8_string(ruby, &out)
     }
 
@@ -482,13 +412,13 @@ impl FastRegexpSet {
     pub fn matches(&self, haystack: RString) -> Vec<usize> {
         let set = &self.0;
         let bytes = haystack_bytes(&haystack);
-        run_regex(bytes.len(), || set.matches(&bytes).iter().collect())
+        set.matches(&bytes).iter().collect()
     }
 
     pub fn is_match(&self, haystack: RString) -> bool {
         let set = &self.0;
         let bytes = haystack_bytes(&haystack);
-        run_regex(bytes.len(), || set.is_match(&bytes))
+        set.is_match(&bytes)
     }
 
     pub fn patterns(&self) -> Vec<String> {

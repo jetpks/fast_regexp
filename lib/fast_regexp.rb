@@ -6,9 +6,9 @@ module Fast
   # Façade over rust/regex with a transparent fallback to stdlib `::Regexp`.
   #
   # `Fast::Regexp.new(pattern)` first tries to compile with rust/regex (fast,
-  # GVL-releasing, byte-based). If the pattern uses features rust/regex does
-  # not support (lookaround, backreferences, possessive quantifiers, etc.) we
-  # fall back to `::Regexp` so consumers don't have to juggle two libraries.
+  # byte-based). If the pattern uses features rust/regex does not support
+  # (lookaround, backreferences, possessive quantifiers, etc.) we fall back
+  # to `::Regexp` so consumers don't have to juggle two libraries.
   class Regexp
   end
 end
