@@ -9,8 +9,6 @@ You get rust/regex's speed on the common path, and a single uniform API (`Fast::
 
 ## Installation
 
-Install [Rust](https://www.rust-lang.org/) via [rustup](https://rustup.rs/) or in any other way.
-
 Add as a dependency:
 
 ```ruby
@@ -20,6 +18,14 @@ gem "fast_regexp"
 # Or without Bundler
 gem install fast_regexp
 ```
+
+Precompiled native gems are published for **arm64-darwin**, **x86_64-linux**,
+and **aarch64-linux** against Ruby **3.3**, **3.4**, and **4.0** — no Rust
+toolchain required on those platforms.
+
+On any other platform/Ruby combo, Bundler/RubyGems falls back to the source
+gem and compiles the extension at install time. That path needs
+[Rust](https://www.rust-lang.org/) (install via [rustup](https://rustup.rs/)).
 
 Include in your code:
 
