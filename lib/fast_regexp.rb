@@ -10,12 +10,23 @@ module Fast
   # (lookaround, backreferences, possessive quantifiers, etc.) we fall back
   # to `::Regexp` so consumers don't have to juggle two libraries.
   class Regexp
+    NATIVE_EXTENSIONS = %w[.bundle .so .rb].freeze
+
+    # Precompiled native gems ship per-ABI subdirs (`fast_regexp/4.0/...`),
+    # the source-gem `rake compile` build lands flat (`fast_regexp/...`).
+    # Pick whichever exists for the current Ruby ABI, with the per-ABI path
+    # winning when both are present.
+    def self.locate_native(base, ruby_version: RUBY_VERSION)
+      abi = ruby_version[/\d+\.\d+/]
+      candidates = [File.join(base, abi, "fast_regexp"), File.join(base, "fast_regexp")]
+      candidates.find { |stem| NATIVE_EXTENSIONS.any? { |ext| File.exist?(stem + ext) } }
+    end
   end
 end
 
-# Load the native extension AFTER the Fast::Regexp class shell exists — the
-# Rust init() looks up Fast::Regexp and registers Native under it.
-require_relative "fast_regexp/fast_regexp"
+native = Fast::Regexp.locate_native(File.expand_path("fast_regexp", __dir__))
+raise LoadError, "could not locate fast_regexp native extension" unless native
+require native
 
 module Fast
   class Regexp

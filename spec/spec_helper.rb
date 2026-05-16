@@ -1,6 +1,8 @@
 # frozen_string_literal: true
 
 require "fast_regexp"
+require "tmpdir"
+require "fileutils"
 
 RSpec.configure do |config|
   config.mock_with :rspec do |mocks|

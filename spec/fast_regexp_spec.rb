@@ -71,6 +71,53 @@ RSpec.describe Fast::Regexp do
     end
   end
 
+  describe ".locate_native" do
+    around do |ex|
+      Dir.mktmpdir { |dir| @dir = dir; ex.run }
+    end
+
+    def touch(*parts)
+      path = File.join(@dir, *parts)
+      FileUtils.mkdir_p(File.dirname(path))
+      File.write(path, "")
+      path
+    end
+
+    it "prefers the per-ABI subdir when present (precompiled gem layout)" do
+      touch("4.0", "fast_regexp.bundle")
+      expect(described_class.locate_native(@dir, ruby_version: "4.0.4"))
+        .to eq File.join(@dir, "4.0", "fast_regexp")
+    end
+
+    it "falls back to a flat layout when the ABI subdir is missing (source-gem build)" do
+      touch("fast_regexp.bundle")
+      expect(described_class.locate_native(@dir, ruby_version: "4.0.4"))
+        .to eq File.join(@dir, "fast_regexp")
+    end
+
+    it "picks the per-ABI path even when both ABI and flat builds exist" do
+      touch("4.0", "fast_regexp.bundle")
+      touch("fast_regexp.bundle")
+      expect(described_class.locate_native(@dir, ruby_version: "4.0.4"))
+        .to eq File.join(@dir, "4.0", "fast_regexp")
+    end
+
+    it "matches the current Ruby's ABI subdir, not adjacent ones" do
+      touch("3.4", "fast_regexp.bundle")
+      expect(described_class.locate_native(@dir, ruby_version: "4.0.4")).to be_nil
+    end
+
+    it "accepts .so as a native extension" do
+      touch("4.0", "fast_regexp.so")
+      expect(described_class.locate_native(@dir, ruby_version: "4.0.4"))
+        .to eq File.join(@dir, "4.0", "fast_regexp")
+    end
+
+    it "returns nil when no native extension is present" do
+      expect(described_class.locate_native(@dir, ruby_version: "4.0.4")).to be_nil
+    end
+  end
+
   describe ".create_many" do
     it "compiles a hash of patterns into a symbol-keyed hash of Fast::Regexp" do
       re = described_class.create_many(word: '\w+', num: '\d+')
