@@ -38,17 +38,52 @@ re = RustRegexp.new('p.t{2}ern*')
 > Note the use of *single quotes* when passing the regular expression as
 > a string to `rust/regex` so that the backslashes aren't interpreted as escapes.
 
-To find a single match in the haystack:
+You can also build from an existing Ruby `Regexp` — trailing flags (`/i`,
+`/x`, `/m`) are translated to inline form for the rust engine:
 
 ```ruby
-RustRegexp.new('\w+:\d+').match("ruby:123, rust:456")
-# => ["ruby:123"]
-
-RustRegexp.new('(\w+):(\d+)').match("ruby:123, rust:456")
-# => ["ruby", "123"]
+RustRegexp.new(/foo/i).pattern    # => "(?i)foo"
+RustRegexp.new(/foo.bar/m).match?("foo\nbar")  # => true (Ruby's /m = dotall)
 ```
 
-To find all matches in the haystack:
+### Matching
+
+`#match` returns a `RustRegexp::MatchData` on a hit and `nil` on no match —
+matching Ruby's `Regexp#match` shape:
+
+```ruby
+m = RustRegexp.new('(\w+):(\d+)').match("ruby:123, rust:456")
+m[0]              # => "ruby:123"   (whole match)
+m[1]              # => "ruby"
+m[2]              # => "123"
+m.pre_match       # => ""
+m.post_match      # => ", rust:456"
+m.captures        # => ["ruby", "123"]
+m.to_a            # => ["ruby:123", "ruby", "123"]
+m.byteoffset(0)   # => [0, 8]
+
+RustRegexp.new('\d+').match("abc")  # => nil
+```
+
+Named captures use rust/regex's `(?P<name>...)` syntax:
+
+```ruby
+m = RustRegexp.new('(?P<word>\w+):(?P<num>\d+)').match("ruby:123")
+m[:word]            # => "ruby"
+m["num"]            # => "123"
+m.named_captures    # => { "word" => "ruby", "num" => "123" }
+```
+
+`#match?`, `#===`, and `#=~` are also available:
+
+```ruby
+re = RustRegexp.new('\d+')
+re.match?("123")                          # => true
+re === "abc 42"                           # => true (works in case/when)
+re =~ "abc 42"                            # => 4 (byte offset of first match)
+```
+
+### Scanning
 
 ```ruby
 RustRegexp.new('\w+:\d+').scan("ruby:123, rust:456")
@@ -58,21 +93,39 @@ RustRegexp.new('(\w+):(\d+)').scan("ruby:123, rust:456")
 # => [["ruby", "123"], ["rust", "456"]]
 ```
 
-To check whether there is at least one match in the haystack:
+For per-match positions and pre/post-match access, use `#scan_matches`:
 
 ```ruby
-RustRegexp.new('\w+:\d+').match?("ruby:123")
-# => true
-
-RustRegexp.new('\w+:\d+').match?("ruby")
-# => false
+RustRegexp.new('(\w+):(\d+)').scan_matches("ruby:123, rust:456").map { |m| m.byteoffset(0) }
+# => [[0, 8], [10, 18]]
 ```
 
-Inspect original pattern:
+### Substitution
+
+`#sub` and `#gsub` use rust/regex's native replacement template — `$1`,
+`${name}`, and `$$` for a literal `$`:
 
 ```ruby
-RustRegexp.new('\w+:\d+').pattern
-# => "(\\w+):(\\d+)"
+re = RustRegexp.new('(\w+):(\d+)')
+re.sub("ruby:123 rust:456",  '$2-$1')   # => "123-ruby rust:456"
+re.gsub("ruby:123 rust:456", '$2-$1')   # => "123-ruby 456-rust"
+```
+
+Block form receives a `MatchData`:
+
+```ruby
+RustRegexp.new('\d+').gsub("a1 b22 c333") { |m| "<#{m[0].size}>" }
+# => "a<1> b<2> c<3>"
+```
+
+Pass `literal: true` to disable `$`-expansion entirely.
+
+### Other
+
+```ruby
+RustRegexp.new('\w+:\d+').pattern         # => "\\w+:\\d+"
+RustRegexp.new('(?P<n>\w+)').names        # => ["n"]
+RustRegexp.new('(a)(b)').captures_count   # => 2
 ```
 
 > [!WARNING]
