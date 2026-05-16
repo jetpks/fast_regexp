@@ -9,7 +9,7 @@ Gem::Specification.new do |spec|
   spec.email = ["eric@ebj.dev"]
 
   spec.summary = "Fast regex for Ruby, backed by rust/regex"
-  spec.description = "Ruby bindings to rust/regex with a Fast::Regexp API: MatchData, sub/gsub, ===, =~, named captures, and GVL release for thread/fiber-friendly matching."
+  spec.description = "Ruby bindings to rust/regex with a Fast::Regexp API: MatchData, sub/gsub, ===, =~, & named captures."
   spec.homepage = "https://github.com/jetpks/fast_regexp"
   spec.license = "MIT"
   spec.metadata = {
