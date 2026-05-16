@@ -28,10 +28,15 @@ jobs:
           bundler-cache: true
 
       - name: Cross-compile native gem
-        uses: oxidize-rb/cross-gem-action@v9
+        uses: oxidize-rb/actions/cross-gem@v1
         with:
           platform: ${{ matrix.platform }}
           ruby-versions: "3.3,3.4,4.0"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cross-gem-${{ matrix.platform }}
+          path: pkg/*.gem
 
   source-gem:
     name: Build source gem
