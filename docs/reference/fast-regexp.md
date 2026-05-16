@@ -27,6 +27,23 @@ is forced and the pattern is malformed in Ruby's engine.
 **Returns** a `Fast::Regexp`. Use `#fast?` / `#stdlib?` to learn which
 backend ended up handling it.
 
+### `Fast::Regexp.create_many(**patterns) → Hash{Symbol => Fast::Regexp}`
+
+Bulk-compile a symbol-keyed hash of patterns. Convenient for declaring a set
+of regex constants in one shot.
+
+```ruby
+RE = Fast::Regexp.create_many(
+  word: '\w+',
+  num:  '\d+',
+).freeze
+
+RE[:word].match("hello")
+```
+
+Each pattern is compiled with `Fast::Regexp.new(pat)` (default options). For
+per-pattern options, call `.new` directly.
+
 ## Instance methods
 
 ### `#match(haystack) → Fast::Regexp::MatchData | nil`

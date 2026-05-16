@@ -71,6 +71,23 @@ RSpec.describe Fast::Regexp do
     end
   end
 
+  describe ".create_many" do
+    it "compiles a hash of patterns into a symbol-keyed hash of Fast::Regexp" do
+      re = described_class.create_many(word: '\w+', num: '\d+')
+      expect(re.keys).to eq [:word, :num]
+      expect(re[:word]).to be_a(described_class)
+      expect(re[:num].match("abc 42")[0]).to eq "42"
+    end
+
+    it "returns an empty hash when given no patterns" do
+      expect(described_class.create_many).to eq({})
+    end
+
+    it "propagates compile errors with the offending pattern's context" do
+      expect { described_class.create_many(ok: '\w+', bad: '(') }.to raise_error(ArgumentError)
+    end
+  end
+
   describe "backend: kwarg" do
     it "defaults to :auto" do
       expect(described_class.new('\w+')).to be_fast
