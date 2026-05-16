@@ -69,4 +69,44 @@ RSpec.describe RustRegexp do
       expect(re.pattern).to eq '\w+'
     end
   end
+
+  describe "concurrency" do
+    # Haystacks larger than the in-extension GVL_RELEASE_THRESHOLD (1024 bytes)
+    # exercise the rb_thread_call_without_gvl path so other Ruby threads /
+    # fibers can run while a match is in progress.
+    let(:large_haystack) { (("foo:#{rand(1_000_000)} " * 200) + "ruby:42") }
+
+    it "returns correct results for haystacks above the GVL-release threshold" do
+      re = described_class.new('(\w+):(\d+)')
+      result = re.match(large_haystack)
+      expect(result.length).to eq 2
+      expect(result[0]).to be_a(String)
+    end
+
+    it "is safe to call from many threads in parallel" do
+      re = described_class.new('(\w+):(\d+)')
+      threads = 8.times.map do
+        Thread.new do
+          50.times.map { re.scan(large_haystack).length }
+        end
+      end
+      results = threads.map(&:value)
+      expected = re.scan(large_haystack).length
+      expect(results.flatten.uniq).to eq [expected]
+    end
+
+    it "is safe to call from fibers under a fiber scheduler" do
+      require "fiber"
+      re = described_class.new('\d+')
+      results = []
+      fibers = 4.times.map do |i|
+        Fiber.new(blocking: false) do
+          results << [i, re.scan("count:#{i} " + large_haystack).length]
+        end
+      end
+      fibers.each(&:resume)
+      expect(results.length).to eq 4
+      expect(results.map { |_, n| n }.uniq.length).to eq 1
+    end
+  end
 end

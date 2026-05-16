@@ -7,5 +7,6 @@ edition = "2021"
 crate-type = ["cdylib"]
 
 [dependencies]
-magnus = "0.7.1"
-regex = "1.11.1"
+magnus = "0.8"
+regex = "1"
+rb-sys = "0.9"
