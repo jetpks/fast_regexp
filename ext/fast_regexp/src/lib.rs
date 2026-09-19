@@ -27,17 +27,11 @@ fn utf8_string(ruby: &Ruby, bytes: &[u8]) -> RString {
 }
 
 fn arg_error(message: impl Into<String>) -> Error {
-    Error::new(
-        Ruby::get().unwrap().exception_arg_error(),
-        message.into(),
-    )
+    Error::new(Ruby::get().unwrap().exception_arg_error(), message.into())
 }
 
 fn type_error(message: impl Into<String>) -> Error {
-    Error::new(
-        Ruby::get().unwrap().exception_type_error(),
-        message.into(),
-    )
+    Error::new(Ruby::get().unwrap().exception_type_error(), message.into())
 }
 
 type CaptureOffset = Option<(usize, usize)>;
@@ -86,7 +80,13 @@ impl RegexInner {
 
     /// Capture-group names in declaration order, unnamed groups skipped.
     fn names(&self, ruby: &Ruby) -> RArray {
-        ruby.ary_from_iter(self.name_index.iter().skip(1).flatten().map(|name| ruby.get_inner(*name)))
+        ruby.ary_from_iter(
+            self.name_index
+                .iter()
+                .skip(1)
+                .flatten()
+                .map(|name| ruby.get_inner(*name)),
+        )
     }
 
     /// Every group's `(start, end)` for one match, index 0 the whole match.
@@ -116,7 +116,9 @@ impl FastRegexp {
         let (unicode,) = kwargs.optional;
         let unicode = unicode.unwrap_or(true);
 
-        Ok(Self(Arc::new(RegexInner::from_pattern(ruby, &pattern, unicode)?)))
+        Ok(Self(Arc::new(RegexInner::from_pattern(
+            ruby, &pattern, unicode,
+        )?)))
     }
 
     fn match_data(&self, haystack: RString, captures: Vec<CaptureOffset>) -> FastMatchData {
@@ -131,7 +133,10 @@ impl FastRegexp {
     /// haystack; only a hit pays for the frozen snapshot the MatchData keeps.
     pub fn rmatch(&self, haystack: RString) -> Option<FastMatchData> {
         let inner = &self.0;
-        let captures = inner.regex.captures(bytes(&haystack)).map(|caps| inner.offsets(&caps))?;
+        let captures = inner
+            .regex
+            .captures(bytes(&haystack))
+            .map(|caps| inner.offsets(&caps))?;
         Some(self.match_data(RString::new_frozen(haystack), captures))
     }
 
@@ -230,7 +235,12 @@ impl FastRegexp {
     /// (via `to_s`) is spliced in for it. The block runs arbitrary Ruby, so
     /// everything is read from a frozen snapshot of the haystack rather than
     /// the live string — the same snapshot every yielded MatchData keeps.
-    fn replace_block(ruby: &Ruby, rb_self: &Self, haystack: RString, limit: Option<usize>) -> Result<RString, Error> {
+    fn replace_block(
+        ruby: &Ruby,
+        rb_self: &Self,
+        haystack: RString,
+        limit: Option<usize>,
+    ) -> Result<RString, Error> {
         let inner = &rb_self.0;
         if !inner.regex.is_match(bytes(&haystack)) {
             // No match: a copy of the haystack, encoding and all, as
@@ -241,10 +251,15 @@ impl FastRegexp {
         let bytes = bytes(&snapshot);
         let mut out = Vec::with_capacity(bytes.len());
         let mut cursor = 0;
-        for caps in inner.regex.captures_iter(bytes).take(limit.unwrap_or(usize::MAX)) {
+        for caps in inner
+            .regex
+            .captures_iter(bytes)
+            .take(limit.unwrap_or(usize::MAX))
+        {
             let whole = caps.get(0).expect("group 0 is the match");
             out.extend_from_slice(&bytes[cursor..whole.start()]);
-            let replacement: Value = ruby.yield_value(rb_self.match_data(snapshot, inner.offsets(&caps)))?;
+            let replacement: Value =
+                ruby.yield_value(rb_self.match_data(snapshot, inner.offsets(&caps)))?;
             let replacement = match RString::from_value(replacement) {
                 Some(string) => string,
                 None => replacement.funcall("to_s", ())?,
@@ -287,7 +302,12 @@ impl FastRegexp {
 /// sibling sharing its buffer — so a later mutation of the caller's string
 /// can't reach it, and nothing was copied to guarantee that.
 #[derive(TypedData)]
-#[magnus(class = "Fast::Regexp::Native::MatchData", free_immediately, size, mark)]
+#[magnus(
+    class = "Fast::Regexp::Native::MatchData",
+    free_immediately,
+    size,
+    mark
+)]
 pub struct FastMatchData {
     haystack: Opaque<RString>,
     /// Index 0 is the whole match. Subsequent entries are capture groups in
@@ -330,7 +350,9 @@ impl FastMatchData {
     /// exception) on the way to being caught.
     fn resolve(&self, key: Value) -> Result<Option<CaptureOffset>, Error> {
         if let Some(index) = Integer::from_value(key) {
-            return Ok(self.capture_index(index.to_i64()?).map(|i| self.captures[i]));
+            return Ok(self
+                .capture_index(index.to_i64()?)
+                .map(|i| self.captures[i]));
         }
         let by_name = |name: &str| self.inner.names.get(name).map(|&i| self.captures[i]);
         if let Some(symbol) = Symbol::from_value(key) {
