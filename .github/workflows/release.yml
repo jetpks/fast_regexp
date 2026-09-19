@@ -68,6 +68,7 @@ jobs:
     # release trigger. Use `workflow_dispatch` to dry-run the build matrix.
     if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
     permissions:
+      id-token: write # OIDC token for RubyGems trusted publishing
       contents: write
     steps:
       - uses: actions/checkout@v4
@@ -83,9 +84,10 @@ jobs:
           path: pkg
           merge-multiple: true
 
+      - name: Configure RubyGems credentials
+        uses: rubygems/configure-rubygems-credentials@v2.1.0
+
       - name: Push gems to RubyGems
-        env:
-          GEM_HOST_API_KEY: ${{ secrets.RUBYGEMS_API_KEY }}
         run: |
           set -e
           for gem in pkg/*.gem; do
