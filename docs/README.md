@@ -20,3 +20,4 @@ Documentation for `fast_regexp` organized by [Diátaxis](https://diataxis.fr/).
 ## Explainers — concepts and design
 
 - [Engine fallback architecture](explainers/engine-fallback.md)
+- [Benchmarks: what each operation costs](explainers/benchmarks.md)

@@ -27,9 +27,10 @@ the rest — pushes that complexity into every call site.
 3. The resulting `Fast::Regexp` object holds whichever backend won, and
    every public method (`#match`, `#sub`, `#gsub`, `#===`, `#=~`, `#scan`,
    …) dispatches accordingly.
-4. `#match` always returns a `Fast::Regexp::MatchData` — a Ruby wrapper
-   that adapts either the rust-backed match or `::MatchData` to a single
-   public surface.
+4. `#match` always returns a `Fast::Regexp::MatchData`. On the fast path
+   that is the native match object itself (`Fast::Regexp::Native::MatchData`
+   subclasses `Fast::Regexp::MatchData`); on the stdlib path it is a small
+   Ruby wrapper adapting `::MatchData` to the same public surface.
 
 ```
                   Fast::Regexp.new(pattern)
@@ -52,7 +53,8 @@ the rest — pushes that complexity into every call site.
                            │
                            ▼
                   Fast::Regexp::MatchData
-                  (wraps either backend)
+          (the native match itself, or a wrapper
+           around ::MatchData on the fallback path)
 ```
 
 ## Consequences

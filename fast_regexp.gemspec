@@ -14,6 +14,7 @@ Gem::Specification.new do |spec|
   spec.license = "MIT"
   spec.metadata = {
     "bug_tracker_uri" => "https://github.com/jetpks/fast_regexp/issues",
+    "changelog_uri" => "https://github.com/jetpks/fast_regexp/blob/main/CHANGELOG.md",
     "homepage_uri" => "https://github.com/jetpks/fast_regexp",
     "source_code_uri" => "https://github.com/jetpks/fast_regexp"
   }
