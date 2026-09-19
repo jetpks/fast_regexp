@@ -7,7 +7,7 @@ use magnus::{
 };
 use regex::bytes::{NoExpand, Regex, RegexBuilder, RegexSet, RegexSetBuilder};
 use std::collections::HashMap;
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 
 /// A haystack's bytes, read in place for the duration of one native call.
 ///
@@ -42,15 +42,20 @@ struct RegexInner {
     regex: Regex,
     /// `name -> capture index`. Empty when the pattern has no named captures.
     names: HashMap<String, usize>,
-    /// Capture-group names in index order (`None` for unnamed groups), as
-    /// interned frozen Ruby Strings, so `names` and `named_captures` hand
-    /// the same String objects out on every call instead of building new
-    /// ones. Marked by every wrapper that holds this `Arc`.
-    name_index: Vec<Option<Opaque<RString>>>,
+    /// Capture-group names in index order (`None` for unnamed groups).
+    name_index: Vec<Option<String>>,
+    /// `name_index` as one Ruby Array of interned frozen Strings (nil for
+    /// unnamed groups), so `names` and `named_captures` hand out the same
+    /// String objects on every call. Built on first use, from a method of a
+    /// live wrapper, so something marks it from the moment it exists; built
+    /// into the Array as each name is interned, because the interning table
+    /// holds its strings only weakly and a GC between two interns would
+    /// otherwise free the first. Marked by every wrapper holding this `Arc`.
+    ruby_names: OnceLock<Opaque<RArray>>,
 }
 
 impl RegexInner {
-    fn from_pattern(ruby: &Ruby, pattern: &str, unicode: bool) -> Result<Self, Error> {
+    fn from_pattern(pattern: &str, unicode: bool) -> Result<Self, Error> {
         let regex = RegexBuilder::new(pattern)
             .unicode(unicode)
             .build()
@@ -61,7 +66,7 @@ impl RegexInner {
         for (idx, name) in regex.capture_names().enumerate() {
             name_index.push(name.map(|n| {
                 names.insert(n.to_owned(), idx);
-                Opaque::from(ruby.str_new(n).to_interned_str())
+                n.to_owned()
             }));
         }
 
@@ -69,24 +74,38 @@ impl RegexInner {
             regex,
             names,
             name_index,
+            ruby_names: OnceLock::new(),
         })
     }
 
     fn mark(&self, marker: &gc::Marker) {
-        for name in self.name_index.iter().flatten() {
-            marker.mark(*name);
+        if let Some(names) = self.ruby_names.get() {
+            marker.mark(*names);
         }
+    }
+
+    /// The interned names Array (see the field), built on first use.
+    fn ruby_names(&self, ruby: &Ruby) -> RArray {
+        ruby.get_inner(*self.ruby_names.get_or_init(|| {
+            let names = ruby.ary_new_capa(self.name_index.len());
+            for name in &self.name_index {
+                let pushed = match name {
+                    Some(name) => names.push(ruby.str_new(name).to_interned_str()),
+                    None => names.push(()),
+                };
+                pushed.expect("pushing onto a fresh, unfrozen Array");
+            }
+            Opaque::from(names)
+        }))
     }
 
     /// Capture-group names in declaration order, unnamed groups skipped.
     fn names(&self, ruby: &Ruby) -> RArray {
-        ruby.ary_from_iter(
-            self.name_index
-                .iter()
-                .skip(1)
-                .flatten()
-                .map(|name| ruby.get_inner(*name)),
-        )
+        let names = self.ruby_names(ruby);
+        // SAFETY: the Array is reachable from the wrapper this runs on behalf
+        // of and no Ruby code runs while the slice is read.
+        let values = unsafe { names.as_slice() };
+        ruby.ary_from_iter(values.iter().skip(1).filter(|v| !v.is_nil()).copied())
     }
 
     /// Every group's `(start, end)` for one match, index 0 the whole match.
@@ -108,7 +127,7 @@ impl DataTypeFunctions for FastRegexp {
 }
 
 impl FastRegexp {
-    pub fn new(ruby: &Ruby, args: &[Value]) -> Result<Self, Error> {
+    pub fn new(args: &[Value]) -> Result<Self, Error> {
         let args = scan_args::<(String,), (), (), (), RHash, ()>(args)?;
         let kwargs = get_kwargs::<_, (), (Option<bool>,), ()>(args.keywords, &[], &["unicode"])?;
 
@@ -116,9 +135,7 @@ impl FastRegexp {
         let (unicode,) = kwargs.optional;
         let unicode = unicode.unwrap_or(true);
 
-        Ok(Self(Arc::new(RegexInner::from_pattern(
-            ruby, &pattern, unicode,
-        )?)))
+        Ok(Self(Arc::new(RegexInner::from_pattern(&pattern, unicode)?)))
     }
 
     fn match_data(&self, haystack: RString, captures: Vec<CaptureOffset>) -> FastMatchData {
@@ -249,7 +266,14 @@ impl FastRegexp {
         }
         let snapshot = RString::new_frozen(haystack);
         let bytes = bytes(&snapshot);
-        let mut out = Vec::with_capacity(bytes.len());
+        // Built as a UTF-8 String from the start: the haystack's own bytes go
+        // in raw (`cat`), each block result through Ruby's encoding
+        // negotiation (`buf_append`, as `String#gsub` appends), so an
+        // incompatible replacement raises Encoding::CompatibilityError rather
+        // than leaving invalid bytes behind. The block's result is taken as
+        // `rb_obj_as_string` takes it: a String as is, anything else via
+        // `to_s`, falling back to `Object#to_s` when that returns a non-String.
+        let out = utf8_string(ruby, &[]);
         let mut cursor = 0;
         for caps in inner
             .regex
@@ -257,21 +281,17 @@ impl FastRegexp {
             .take(limit.unwrap_or(usize::MAX))
         {
             let whole = caps.get(0).expect("group 0 is the match");
-            out.extend_from_slice(&bytes[cursor..whole.start()]);
+            out.cat(&bytes[cursor..whole.start()]);
             let replacement: Value =
                 ruby.yield_value(rb_self.match_data(snapshot, inner.offsets(&caps)))?;
-            let replacement = match RString::from_value(replacement) {
-                Some(string) => string,
-                None => replacement.funcall("to_s", ())?,
-            };
-            out.extend_from_slice(unsafe { replacement.as_slice() });
+            out.buf_append(replacement.to_r_string()?)?;
             cursor = whole.end();
         }
-        out.extend_from_slice(&bytes[cursor..]);
+        out.cat(&bytes[cursor..]);
         // Keep the snapshot reachable from this frame until the last read of
         // `bytes` above, whatever the yielded MatchData objects' fate.
         std::hint::black_box(snapshot);
-        Ok(utf8_string(ruby, &out))
+        Ok(out)
     }
 
     pub fn sub_block(ruby: &Ruby, rb_self: &Self, haystack: RString) -> Result<RString, Error> {
@@ -359,12 +379,22 @@ impl FastMatchData {
             return Ok(by_name(&symbol.name()?));
         }
         if let Some(name) = RString::from_value(key) {
-            return Ok(by_name(unsafe { name.as_str()? }));
+            // A UTF-8 (or ASCII) name is read in place; any other encoding
+            // is transcoded, and one that can't be names no group.
+            return Ok(match unsafe { name.as_str() } {
+                Ok(name) => by_name(name),
+                Err(_) => name.to_string().ok().and_then(|name| by_name(&name)),
+            });
         }
         // Anything else that converts to an Integer (a Float, a `to_int`
-        // object) indexes like one, as `::MatchData#[]` allows.
-        match i64::try_convert(key) {
-            Ok(index) => Ok(self.capture_index(index).map(|i| self.captures[i])),
+        // object) indexes like one, as `::MatchData#[]` allows; anything
+        // that converts to a String (`to_str`) names a group, as this class
+        // has always allowed.
+        if let Ok(index) = i64::try_convert(key) {
+            return Ok(self.capture_index(index).map(|i| self.captures[i]));
+        }
+        match RString::try_convert(key) {
+            Ok(name) => Ok(by_name(&name.to_string()?)),
             Err(_) => Err(type_error(
                 "no implicit conversion of capture key into Integer, String, or Symbol",
             )),
@@ -403,15 +433,20 @@ impl FastMatchData {
 
     pub fn named_captures(ruby: &Ruby, rb_self: &Self) -> Result<RHash, Error> {
         let hash = ruby.hash_new();
+        let names = rb_self.inner.ruby_names(ruby);
+        // SAFETY: the Array is reachable from this match's wrapper and no
+        // Ruby code runs while the slice is read.
+        let names = unsafe { names.as_slice() };
         // Iterate in declaration order so the hash preserves regex order.
-        for (idx, name) in rb_self.inner.name_index.iter().enumerate() {
-            if let Some(name) = name {
-                let value: Value = match rb_self.captures[idx] {
-                    Some(r) => rb_self.slice(ruby, r).as_value(),
-                    None => ruby.qnil().as_value(),
-                };
-                hash.aset(ruby.get_inner(*name), value)?;
+        for (idx, name) in names.iter().enumerate() {
+            if name.is_nil() {
+                continue;
             }
+            let value: Value = match rb_self.captures[idx] {
+                Some(r) => rb_self.slice(ruby, r).as_value(),
+                None => ruby.qnil().as_value(),
+            };
+            hash.aset(*name, value)?;
         }
         Ok(hash)
     }

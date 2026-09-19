@@ -30,11 +30,10 @@ module Fast
     class MatchData
       include Enumerable
 
-      attr_reader :backend, :string
+      attr_reader :backend
 
-      def initialize(backend, haystack)
+      def initialize(backend)
         @backend = backend
-        @string = haystack
       end
 
       def native? = false
@@ -54,6 +53,10 @@ module Fast
       def post_match = @backend.post_match
       def to_s = @backend.to_s
       alias_method :match, :to_s
+
+      # The haystack the match was taken over: `::MatchData#string` is already
+      # a frozen snapshot, the same thing the native subclass keeps.
+      def string = @backend.string
 
       # Byte-based offsets. `::MatchData#byteoffset` exists since Ruby 3.2;
       # its `byte_begin`/`byte_end` don't (3.4 added `bytebegin`/`byteend`),
@@ -91,6 +94,11 @@ module Fast
         def native = self
         def stdlib = nil
         def backend = self
+
+        # Immutable, so a copy is the object itself (the wrapped class has no
+        # allocator for `dup`/`clone` to go through).
+        def dup = self
+        def clone(freeze: nil) = self
       end
     end
 
@@ -162,7 +170,7 @@ module Fast
       haystack = coerce_string(haystack)
       return @backend._native_match(haystack) if fast?
       m = @backend.match(haystack)
-      m && MatchData.new(m, haystack)
+      m && MatchData.new(m)
     end
 
     def match?(haystack)
@@ -192,7 +200,7 @@ module Fast
       haystack = coerce_string(haystack)
       return @backend.scan_matches(haystack) if fast?
       results = []
-      haystack.scan(@backend) { results << MatchData.new(::Regexp.last_match, haystack) }
+      haystack.scan(@backend) { results << MatchData.new(::Regexp.last_match) }
       results
     end
 
@@ -319,11 +327,11 @@ module Fast
     # Stdlib path: String#sub/#gsub already do single-pass iterate-and-replace
     # and set $~ inside the block, so wrap the current ::MatchData and yield.
     def stdlib_sub_with_block(haystack)
-      haystack.sub(@backend) { yield(MatchData.new(::Regexp.last_match, haystack)).to_s }
+      haystack.sub(@backend) { yield(MatchData.new(::Regexp.last_match)).to_s }
     end
 
     def stdlib_gsub_with_block(haystack)
-      haystack.gsub(@backend) { yield(MatchData.new(::Regexp.last_match, haystack)).to_s }
+      haystack.gsub(@backend) { yield(MatchData.new(::Regexp.last_match)).to_s }
     end
 
     def coerce_string(value)

@@ -6,7 +6,7 @@ require "fileutils"
 
 # CI runs the suite a second time with GC_STRESS set: a GC at every
 # allocation, to catch a native object read after it was freed or moved.
-GC.stress = true if ENV["GC_STRESS"]
+GC.stress = true if %w[1 true yes].include?(ENV["GC_STRESS"].to_s.downcase)
 
 RSpec.configure do |config|
   config.mock_with :rspec do |mocks|

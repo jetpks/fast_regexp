@@ -67,3 +67,56 @@ RSpec.describe Fast::Regexp::MatchData do
     end
   end
 end
+
+RSpec.describe Fast::Regexp::MatchData, "review follow-ups" do
+  it "keeps interned group names alive from the moment they are made, even under GC stress" do
+    names = Array.new(12) { |i| "zq#{i}xj_#{rand(1_000_000)}_wk" }
+    pattern = names.each_with_index.map { |n, i| "(?P<#{n}>#{i})" }.join
+    GC.stress = true
+    re = Fast::Regexp.new(pattern)
+    m = re.match((0..11).map(&:to_s).join)
+    got = [re.names, m.names, m.named_captures.keys]
+    GC.stress = false
+    GC.start
+    expect(got).to all(eq(names))
+    expect(re.names).to eq(names)
+  end
+
+  it "negotiates the replacement's encoding in a block form like String#gsub" do
+    re = Fast::Regexp.new("l")
+    expect { re.gsub("héllo") { "ü".encode("ISO-8859-1") } }.to raise_error(Encoding::CompatibilityError)
+    expect(re.gsub("hello") { "ü".encode("ISO-8859-1") }.encoding).to eq(Encoding::ISO_8859_1)
+    expect(re.gsub("héllo") { "ü" }).to eq("héüüo")
+  end
+
+  it "takes a block result the way String#gsub does: to_s, then Object#to_s if that isn't a String" do
+    odd = Object.new
+    def odd.to_s = 42
+    expect(Fast::Regexp.new("a").gsub("a=1") { odd }).to match(/\A#<Object:0x[0-9a-f]+>=1\z/)
+    expect(Fast::Regexp.new("a").gsub("a=1") { :sym }).to eq("sym=1")
+  end
+
+  it "answers dup and clone with itself on the fast path" do
+    m = Fast::Regexp.new('(\w+)').match("key")
+    expect(m.dup).to be(m)
+    expect(m.clone).to be(m)
+    expect(m.clone(freeze: true)).to be(m)
+  end
+
+  it "returns a frozen snapshot from #string on both paths" do
+    fast = Fast::Regexp.new('(\w+)=').match(+"a=1")
+    slow = Fast::Regexp.new('(?<key>\w+)(?=:)').match(+"a:1")
+    expect(fast.string).to eq("a=1").and be_frozen
+    expect(slow.string).to eq("a:1").and be_frozen
+  end
+
+  it "looks names up from Strings in any encoding, and from objects with to_str" do
+    m = Fast::Regexp.new('(?P<clé>\w+)=(?P<value>\d+)').match("a=1")
+    expect(m["clé"]).to eq("a")
+    expect(m["clé".encode("ISO-8859-1")]).to eq("a")
+    expect(m["nope".encode("UTF-16LE")]).to be_nil
+    key = Object.new
+    def key.to_str = "value"
+    expect(m[key]).to eq("1")
+  end
+end

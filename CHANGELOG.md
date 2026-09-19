@@ -20,13 +20,18 @@ All notable changes to this gem are documented here. The format follows
   `#native`, `#backend` and `#stdlib` keep their answers; `m.class` is now
   `Fast::Regexp::Native::MatchData` on the fast path. The stdlib path keeps
   the wrapper.
-- **`MatchData#string` on the fast path is a frozen snapshot** of the
-  haystack (the haystack itself when it was already frozen), the same
-  guarantee `::MatchData#string` gives. Previously it returned a fresh copy
-  each call; the match's own data was always safe from later mutation of
-  the haystack, and still is — now without copying the haystack per match.
+- **`MatchData#string` is a frozen snapshot** of the haystack on both paths
+  (the haystack itself when it was already frozen), the guarantee
+  `::MatchData#string` gives. The fast path used to return a fresh copy per
+  call and the stdlib wrapper the caller's mutable String; the match's own
+  data was always safe from later mutation, and still is — now without
+  copying the haystack per match. `dup` and `clone` of a fast-path match
+  return the match itself (it is immutable).
 - **Block-form `sub`/`gsub` run in one native pass**, yielding one
-  `MatchData` per match and splicing the block's `to_s` in. Per match this
+  `MatchData` per match and splicing the block's result in the way
+  `String#gsub` does: `to_s`, `Object#to_s` if that isn't a String, and
+  Ruby's encoding negotiation for the append (an incompatible replacement
+  raises `Encoding::CompatibilityError`). Per match this
   costs the `MatchData` and whatever the block returns, where it cost five
   objects before; 200 KB `gsub` with a block runs 1.8x faster.
 - **`=~` builds nothing**: it asks the engine for the first match's offset
@@ -35,8 +40,9 @@ All notable changes to this gem are documented here. The format follows
   `m["name"]` tried an Integer conversion first and paid for the exception
   it raised — 5 objects and 10x stdlib's time per lookup. Lookup now
   dispatches on the key's type: 1 object, on par with `::MatchData`.
-- **Group names are interned once per pattern**; `#names` and
-  `#named_captures` hand out the same frozen Strings on every call.
+- **Group names are interned once per pattern**, on first use; `#names` and
+  `#named_captures` hand out the same frozen Strings on every call. Name
+  keys in any encoding, and `to_str` objects, look groups up as before.
 
 ### Fixed
 

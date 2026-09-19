@@ -66,11 +66,14 @@ The whole match. Aliased as `#match`.
 
 ### `#string → String`
 
-The haystack the match was taken over. On the fast path this is a frozen
-snapshot — the haystack itself when it was already frozen, otherwise a
-frozen copy-on-write sibling of it — so mutating the original afterwards
-changes nothing the match reads, the same guarantee `::MatchData#string`
-gives. On the stdlib path it is the haystack as passed.
+The haystack the match was taken over, as a frozen snapshot on both paths —
+the haystack itself when it was already frozen, otherwise a frozen
+copy-on-write sibling of it — so mutating the original afterwards changes
+nothing the match reads, the same guarantee `::MatchData#string` gives.
+
+### `#dup`, `#clone`
+
+A match is immutable; on the fast path both return the match itself.
 
 ### `#byteoffset(key) → [Integer, Integer] | [nil, nil]`
 
