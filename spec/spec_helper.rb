@@ -4,6 +4,10 @@ require "fast_regexp"
 require "tmpdir"
 require "fileutils"
 
+# CI runs the suite a second time with GC_STRESS set: a GC at every
+# allocation, to catch a native object read after it was freed or moved.
+GC.stress = true if ENV["GC_STRESS"]
+
 RSpec.configure do |config|
   config.mock_with :rspec do |mocks|
     mocks.verify_partial_doubles = true

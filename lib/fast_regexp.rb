@@ -21,6 +21,59 @@ module Fast
       candidates = [File.join(base, abi, "fast_regexp"), File.join(base, "fast_regexp")]
       candidates.find { |stem| NATIVE_EXTENSIONS.any? { |ext| File.exist?(stem + ext) } }
     end
+
+    # One match, whichever engine produced it. On the fast path the match
+    # *is* a `Fast::Regexp::Native::MatchData`, a subclass of this one
+    # defined by the extension (so it must exist before the extension
+    # loads); on the stdlib path it's an instance of this class wrapping the
+    # `::MatchData`. Same public surface either way.
+    class MatchData
+      include Enumerable
+
+      attr_reader :backend, :string
+
+      def initialize(backend, haystack)
+        @backend = backend
+        @string = haystack
+      end
+
+      def native? = false
+      def stdlib? = true
+
+      def native = nil
+      def stdlib = @backend
+
+      def [](key) = @backend[key]
+      def to_a = @backend.to_a
+      def captures = @backend.captures
+      def named_captures = @backend.named_captures
+      def names = @backend.names
+      def size = @backend.size
+      alias_method :length, :size
+      def pre_match = @backend.pre_match
+      def post_match = @backend.post_match
+      def to_s = @backend.to_s
+      alias_method :match, :to_s
+
+      # Byte-based offsets. `::MatchData#byteoffset` exists since Ruby 3.2;
+      # its `byte_begin`/`byte_end` don't (3.4 added `bytebegin`/`byteend`),
+      # so those two derive from `byteoffset` here.
+      def byteoffset(key) = @backend.byteoffset(key)
+      def byte_begin(key) = byteoffset(key)[0]
+      def byte_end(key) = byteoffset(key)[1]
+
+      def each(&block) = to_a.each(&block)
+      def values_at(*indices) = indices.map { |i| self[i] }
+
+      def ==(other)
+        other.is_a?(MatchData) && to_a == other.to_a && string == other.string
+      end
+      alias_method :eql?, :==
+
+      def hash = [to_a, string].hash
+
+      def inspect = "#<Fast::Regexp::MatchData #{to_s.inspect}>"
+    end
   end
 end
 
@@ -30,6 +83,17 @@ require native
 
 module Fast
   class Regexp
+    class Native
+      class MatchData
+        def native? = true
+        def stdlib? = false
+
+        def native = self
+        def stdlib = nil
+        def backend = self
+      end
+    end
+
     RUBY_FLAG_MAP = {
       ::Regexp::IGNORECASE => "i",
       ::Regexp::EXTENDED => "x",
@@ -96,8 +160,9 @@ module Fast
 
     def match(haystack)
       haystack = coerce_string(haystack)
-      raw = fast? ? @backend._native_match(haystack) : @backend.match(haystack)
-      raw && MatchData.new(raw, haystack)
+      return @backend._native_match(haystack) if fast?
+      m = @backend.match(haystack)
+      m && MatchData.new(m, haystack)
     end
 
     def match?(haystack)
@@ -113,8 +178,10 @@ module Fast
     # also returns bytes here for API consistency).
     def =~(other)
       return nil unless other.respond_to?(:to_str)
-      m = match(other.to_str)
-      m && m.byte_begin(0)
+      haystack = other.to_str
+      return @backend._native_find(haystack) if fast?
+      m = @backend.match(haystack)
+      m && m.byteoffset(0)[0]
     end
 
     def scan(haystack)
@@ -123,22 +190,17 @@ module Fast
 
     def scan_matches(haystack)
       haystack = coerce_string(haystack)
-      if fast?
-        @backend.scan_matches(haystack).map { |m| MatchData.new(m, haystack) }
-      else
-        results = []
-        haystack.scan(@backend) { results << MatchData.new(::Regexp.last_match, haystack) }
-        results
-      end
+      return @backend.scan_matches(haystack) if fast?
+      results = []
+      haystack.scan(@backend) { results << MatchData.new(::Regexp.last_match, haystack) }
+      results
     end
 
     def sub(haystack, replacement = nil, literal: false, &block)
       haystack = coerce_string(haystack)
-      if block
+      if block_given?
         raise ArgumentError, "wrong number of arguments (given 2, expected 1 with block)" if replacement
-        m = match(haystack)
-        return haystack.dup unless m
-        "#{m.pre_match}#{block.call(m)}#{m.post_match}"
+        fast? ? @backend._native_sub_block(haystack, &block) : stdlib_sub_with_block(haystack, &block)
       else
         raise ArgumentError, "wrong number of arguments (given 1, expected 2)" if replacement.nil?
         replacement = coerce_string(replacement)
@@ -152,9 +214,9 @@ module Fast
 
     def gsub(haystack, replacement = nil, literal: false, &block)
       haystack = coerce_string(haystack)
-      if block
+      if block_given?
         raise ArgumentError, "wrong number of arguments (given 2, expected 1 with block)" if replacement
-        fast? ? fast_gsub_with_block(haystack, &block) : stdlib_gsub_with_block(haystack, &block)
+        fast? ? @backend._native_gsub_block(haystack, &block) : stdlib_gsub_with_block(haystack, &block)
       else
         raise ArgumentError, "wrong number of arguments (given 1, expected 2)" if replacement.nil?
         replacement = coerce_string(replacement)
@@ -254,27 +316,12 @@ module Fast
       end
     end
 
-    # Fast path: rust/regex has no native iterate-with-replace, so we scan all
-    # match positions up-front, then splice the result by byte offset in one
-    # pass. Stays UTF-8 since haystack and match slices are.
-    def fast_gsub_with_block(haystack)
-      matches = scan_matches(haystack)
-      return haystack.dup if matches.empty?
-
-      out = String.new(encoding: Encoding::UTF_8)
-      cursor = 0
-      matches.each do |m|
-        bs, be = m.byteoffset(0)
-        out << haystack.byteslice(cursor, bs - cursor) if bs > cursor
-        out << yield(m).to_s
-        cursor = be
-      end
-      out << haystack.byteslice(cursor, haystack.bytesize - cursor) if cursor < haystack.bytesize
-      out
+    # Stdlib path: String#sub/#gsub already do single-pass iterate-and-replace
+    # and set $~ inside the block, so wrap the current ::MatchData and yield.
+    def stdlib_sub_with_block(haystack)
+      haystack.sub(@backend) { yield(MatchData.new(::Regexp.last_match, haystack)).to_s }
     end
 
-    # Stdlib path: String#gsub already does single-pass iterate-and-replace
-    # and sets $~ inside the block, so wrap the current ::MatchData and yield.
     def stdlib_gsub_with_block(haystack)
       haystack.gsub(@backend) { yield(MatchData.new(::Regexp.last_match, haystack)).to_s }
     end
@@ -283,54 +330,6 @@ module Fast
       return value if value.is_a?(String)
       return value.to_str if value.respond_to?(:to_str)
       raise TypeError, "no implicit conversion of #{value.class} into String"
-    end
-
-    # Wraps either a Fast::Regexp::Native::MatchData or a stdlib ::MatchData
-    # so callers see one type regardless of which backend ran.
-    class MatchData
-      include Enumerable
-
-      attr_reader :backend, :string
-
-      def initialize(backend, haystack)
-        @backend = backend
-        @string = haystack
-      end
-
-      def native? = @backend.is_a?(Fast::Regexp::Native::MatchData)
-      def stdlib? = !native?
-
-      def native = native? ? @backend : nil
-      def stdlib = stdlib? ? @backend : nil
-
-      def [](key) = @backend[key]
-      def to_a = @backend.to_a
-      def captures = @backend.captures
-      def named_captures = @backend.named_captures
-      def names = @backend.names
-      def size = @backend.size
-      alias_method :length, :size
-      def pre_match = @backend.pre_match
-      def post_match = @backend.post_match
-      def to_s = @backend.to_s
-
-      # Byte-based offsets. Both backends expose these (stdlib MatchData has
-      # `byteoffset` / `byte_begin` / `byte_end` since Ruby 3.2).
-      def byteoffset(key) = @backend.byteoffset(key)
-      def byte_begin(key) = @backend.byte_begin(key)
-      def byte_end(key) = @backend.byte_end(key)
-
-      def each(&block) = to_a.each(&block)
-      def values_at(*indices) = indices.map { |i| self[i] }
-
-      def ==(other)
-        other.is_a?(MatchData) && to_a == other.to_a && string == other.string
-      end
-      alias_method :eql?, :==
-
-      def hash = [to_a, string].hash
-
-      def inspect = "#<Fast::Regexp::MatchData #{to_s.inspect}>"
     end
   end
 end
