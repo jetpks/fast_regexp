@@ -244,7 +244,18 @@ In-depth docs live under [`docs/`](docs/README.md), organized via the
 - **Tutorial:** [Getting started](docs/tutorials/getting-started.md)
 - **How-to:** [Migrate from stdlib `::Regexp`](docs/how-to/migrate-from-stdlib-regexp.md), [Handle unsupported syntax](docs/how-to/handle-unsupported-syntax.md)
 - **Reference:** [`Fast::Regexp`](docs/reference/fast-regexp.md), [`MatchData`](docs/reference/fast-regexp-matchdata.md), [`Set`](docs/reference/fast-regexp-set.md)
-- **Explainers:** [Engine fallback](docs/explainers/engine-fallback.md)
+- **Explainers:** [Engine fallback](docs/explainers/engine-fallback.md), [Benchmarks](docs/explainers/benchmarks.md)
+
+## Performance
+
+Matching runs 8–10x stdlib `::Regexp` on a hit or a miss, scanning 2–5x,
+`gsub` with a template 7–13x; reading a `MatchData` costs the same objects
+as `::MatchData`, and `match?`, `=~`, `===` and `Set#match?` allocate
+nothing. Compiling a pattern is the one place rust/regex is slower (it
+builds its automaton up front), so compile once and keep the object. Every
+operation, with the stdlib equivalent beside it, is on the
+[benchmarks page](docs/explainers/benchmarks.md); reproduce with
+`bundle exec ruby benchmark/operations.rb`.
 
 ## Development
 
@@ -253,6 +264,7 @@ bin/setup     # install deps
 bin/console   # interactive prompt to play around
 rake compile  # (re)compile extension
 rake spec     # run tests
+bundle exec ruby benchmark/operations.rb   # the benchmarks page's table
 ```
 
 ## Contributing

@@ -63,6 +63,7 @@ Case-equality. Returns `false` for non-string-like values, enabling
 ### `#=~(other) → Integer | nil`
 
 Byte offset of the first match, or `nil`. **Byte-based**, not character-based.
+Builds no `MatchData` on the fast path.
 
 ### `#scan(haystack) → Array<String> | Array<Array<String | nil>>`
 
@@ -81,8 +82,11 @@ Replace the first match.
 
 - String form: rust-style templates (`$1`, `${name}`, `$$`). On the stdlib
   fallback path these are translated to Ruby's `\1`/`\k<name>` automatically.
-- Block form: receives a `MatchData`; the return value substitutes for the
-  match.
+- Block form: receives a `MatchData` per match; the return value's `to_s`
+  substitutes for the match. On the fast path the haystack is read from a
+  frozen snapshot while the block runs, so the block may do anything to
+  the original String. With no match, a copy of the haystack comes back in
+  its own encoding.
 - `literal: true`: treat the replacement as a literal string (no
   `$`-expansion).
 

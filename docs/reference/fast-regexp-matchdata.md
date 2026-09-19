@@ -4,9 +4,12 @@ type: reference
 
 # `Fast::Regexp::MatchData`
 
-Wraps either a rust-backed `Fast::Regexp::Native::MatchData` or a stdlib
-`::MatchData`. The public surface is identical regardless of which engine
-produced it.
+One match, from either engine. On the fast path the match *is* a
+`Fast::Regexp::Native::MatchData`, a subclass of this class defined by the
+extension, holding capture offsets into a frozen snapshot of the haystack;
+on the stdlib path it is an instance of this class wrapping a `::MatchData`.
+The public surface is identical regardless of which engine produced it, and
+`is_a?(Fast::Regexp::MatchData)` is true for both.
 
 `MatchData` is constructed by `Fast::Regexp#match` and `#scan_matches` — you
 shouldn't instantiate it directly.
@@ -19,7 +22,9 @@ Returns a capture as a String, or `nil` if the group did not participate or
 the index/name is unknown.
 
 `key` may be an `Integer` (including negative indices), `String`, or
-`Symbol` naming a capture.
+`Symbol` naming a capture, or anything that converts to an Integer (a
+Float truncates), as with `::MatchData#[]`. Any other key raises
+`TypeError`.
 
 ### `#to_a → Array<String | nil>`
 
@@ -61,7 +66,11 @@ The whole match. Aliased as `#match`.
 
 ### `#string → String`
 
-The original haystack.
+The haystack the match was taken over. On the fast path this is a frozen
+snapshot — the haystack itself when it was already frozen, otherwise a
+frozen copy-on-write sibling of it — so mutating the original afterwards
+changes nothing the match reads, the same guarantee `::MatchData#string`
+gives. On the stdlib path it is the haystack as passed.
 
 ### `#byteoffset(key) → [Integer, Integer] | [nil, nil]`
 
@@ -79,23 +88,23 @@ End byte offset of the capture.
 
 ### `#native? → Boolean`
 
-`true` if the underlying object is `Fast::Regexp::Native::MatchData`.
+`true` on the fast path (the match is a `Fast::Regexp::Native::MatchData`).
 
 ### `#stdlib? → Boolean`
 
-`true` if the underlying object is `::MatchData`.
+`true` on the stdlib path (the match wraps a `::MatchData`).
 
 ### `#native → Fast::Regexp::Native::MatchData | nil`
 
-The rust-backed MatchData, or `nil` on the stdlib path.
+The match itself on the fast path, or `nil` on the stdlib path.
 
 ### `#stdlib → ::MatchData | nil`
 
-The stdlib `::MatchData`, or `nil` on the fast path.
+The wrapped `::MatchData`, or `nil` on the fast path.
 
 ### `#backend → Fast::Regexp::Native::MatchData | ::MatchData`
 
-The active backend regardless of type.
+The active backend regardless of type: the match itself on the fast path.
 
 ## Enumeration & equality
 
