@@ -3,6 +3,12 @@
 All notable changes to this gem are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.8.0] - 2026-10-30
+
+### Changed
+
+- Ruby 3.3 support dropped; `required_ruby_version` is now `>= 3.4`.
+
 ## [0.7.0] - 2026-09-19
 
 ### Changed
