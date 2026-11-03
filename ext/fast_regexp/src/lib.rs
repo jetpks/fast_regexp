@@ -1,19 +1,20 @@
 use magnus::{
     function, gc, method,
     scan_args::{get_kwargs, scan_args},
+    typed_data::Obj,
     value::{Opaque, ReprValue},
     DataTypeFunctions, Error, Integer, Module, Object, RArray, RClass, RHash, RString, Ruby,
     Symbol, TryConvert, TypedData, Value,
 };
 use regex::bytes::{NoExpand, Regex, RegexBuilder, RegexSet, RegexSetBuilder};
 use std::collections::HashMap;
-use std::sync::{Arc, OnceLock};
+use std::sync::Arc;
 
 /// A haystack's bytes, read in place for the duration of one native call.
 ///
 /// Sound because the call hands nothing back to Ruby while the borrow lives:
-/// the GVL is held and no block is yielded, so no Ruby code can mutate the
-/// string, and a GC triggered by the result objects the call builds neither
+/// the current Ractor's GVL is held and no block is yielded; strings shared
+/// with other Ractors are frozen. A GC triggered by result objects neither
 /// frees nor moves it — a method argument is rooted and pinned on the VM
 /// stack for the whole call. Paths that *do* run Ruby code mid-call (the
 /// block forms of `sub`/`gsub`) read a frozen snapshot instead; see
@@ -42,61 +43,47 @@ struct RegexInner {
     regex: Regex,
     /// `name -> capture index`. Empty when the pattern has no named captures.
     names: HashMap<String, usize>,
-    /// Capture-group names in index order (`None` for unnamed groups).
-    name_index: Vec<Option<String>>,
-    /// `name_index` as one Ruby Array of interned frozen Strings (nil for
-    /// unnamed groups), so `names` and `named_captures` hand out the same
-    /// String objects on every call. Built on first use, from a method of a
-    /// live wrapper, so something marks it from the moment it exists; built
-    /// into the Array as each name is interned, because the interning table
-    /// holds its strings only weakly and a GC between two interns would
-    /// otherwise free the first. Marked by every wrapper holding this `Arc`.
-    ruby_names: OnceLock<Opaque<RArray>>,
+    /// Frozen Array of interned frozen Strings in capture order (nil for
+    /// unnamed groups). Built before publication so all Ruby state remains
+    /// immutable when the regex or a match is shared between Ractors.
+    ruby_names: Opaque<RArray>,
 }
 
 impl RegexInner {
-    fn from_pattern(pattern: &str, unicode: bool) -> Result<Self, Error> {
+    fn from_pattern(ruby: &Ruby, pattern: &str, unicode: bool) -> Result<Self, Error> {
         let regex = RegexBuilder::new(pattern)
             .unicode(unicode)
             .build()
             .map_err(|e| arg_error(e.to_string()))?;
 
         let mut names = HashMap::new();
-        let mut name_index = Vec::with_capacity(regex.captures_len());
+        let ruby_names = ruby.ary_new_capa(regex.captures_len());
         for (idx, name) in regex.capture_names().enumerate() {
-            name_index.push(name.map(|n| {
-                names.insert(n.to_owned(), idx);
-                n.to_owned()
-            }));
+            match name {
+                Some(name) => {
+                    names.insert(name.to_owned(), idx);
+                    // Root each interned string immediately: the interning
+                    // table holds it weakly, and the next push may run GC.
+                    ruby_names.push(ruby.str_new(name).to_interned_str())?;
+                }
+                None => ruby_names.push(())?,
+            }
         }
+        ruby_names.freeze();
 
         Ok(Self {
             regex,
             names,
-            name_index,
-            ruby_names: OnceLock::new(),
+            ruby_names: ruby_names.into(),
         })
     }
 
     fn mark(&self, marker: &gc::Marker) {
-        if let Some(names) = self.ruby_names.get() {
-            marker.mark(*names);
-        }
+        marker.mark(self.ruby_names);
     }
 
-    /// The interned names Array (see the field), built on first use.
     fn ruby_names(&self, ruby: &Ruby) -> RArray {
-        ruby.get_inner(*self.ruby_names.get_or_init(|| {
-            let names = ruby.ary_new_capa(self.name_index.len());
-            for name in &self.name_index {
-                let pushed = match name {
-                    Some(name) => names.push(ruby.str_new(name).to_interned_str()),
-                    None => names.push(()),
-                };
-                pushed.expect("pushing onto a fresh, unfrozen Array");
-            }
-            Opaque::from(names)
-        }))
+        ruby.get_inner(self.ruby_names)
     }
 
     /// Capture-group names in declaration order, unnamed groups skipped.
@@ -117,7 +104,13 @@ impl RegexInner {
 }
 
 #[derive(TypedData)]
-#[magnus(class = "Fast::Regexp::Native", free_immediately, size, mark)]
+#[magnus(
+    class = "Fast::Regexp::Native",
+    free_immediately,
+    size,
+    mark,
+    frozen_shareable
+)]
 pub struct FastRegexp(Arc<RegexInner>);
 
 impl DataTypeFunctions for FastRegexp {
@@ -127,7 +120,7 @@ impl DataTypeFunctions for FastRegexp {
 }
 
 impl FastRegexp {
-    pub fn new(args: &[Value]) -> Result<Self, Error> {
+    pub fn new(ruby: &Ruby, args: &[Value]) -> Result<Obj<Self>, Error> {
         let args = scan_args::<(String,), (), (), (), RHash, ()>(args)?;
         let kwargs = get_kwargs::<_, (), (Option<bool>,), ()>(args.keywords, &[], &["unicode"])?;
 
@@ -135,7 +128,12 @@ impl FastRegexp {
         let (unicode,) = kwargs.optional;
         let unicode = unicode.unwrap_or(true);
 
-        Ok(Self(Arc::new(RegexInner::from_pattern(&pattern, unicode)?)))
+        let inner = RegexInner::from_pattern(ruby, &pattern, unicode)?;
+        let names = inner.ruby_names(ruby);
+        let wrapped = ruby.obj_wrap(Self(Arc::new(inner)));
+        // Keep the Array rooted on this stack until the wrapper can mark it.
+        std::hint::black_box(names);
+        Ok(wrapped)
     }
 
     fn match_data(&self, haystack: RString, captures: Vec<CaptureOffset>) -> FastMatchData {
@@ -326,7 +324,8 @@ impl FastRegexp {
     class = "Fast::Regexp::Native::MatchData",
     free_immediately,
     size,
-    mark
+    mark,
+    frozen_shareable
 )]
 pub struct FastMatchData {
     haystack: Opaque<RString>,
@@ -518,7 +517,7 @@ impl FastMatchData {
     }
 }
 
-#[magnus::wrap(class = "Fast::Regexp::Set", free_immediately, size)]
+#[magnus::wrap(class = "Fast::Regexp::Set", free_immediately, size, frozen_shareable)]
 pub struct FastRegexpSet(RegexSet);
 
 impl FastRegexpSet {
@@ -553,6 +552,8 @@ impl FastRegexpSet {
 
 #[magnus::init]
 pub fn init(ruby: &Ruby) -> Result<(), Error> {
+    // All shared Rust state is Sync; retained Ruby objects are immutable.
+    unsafe { rb_sys::rb_ext_ractor_safe(true) };
     let object_class = ruby.class_object();
     // Fast::Regexp and Fast::Regexp::MatchData must already be defined by
     // lib/fast_regexp.rb before this extension is required — the Ruby façade
@@ -603,6 +604,12 @@ pub fn init(ruby: &Ruby) -> Result<(), Error> {
     regexp_set_class.define_method("match", method!(FastRegexpSet::matches, 1))?;
     regexp_set_class.define_method("match?", method!(FastRegexpSet::is_match, 1))?;
     regexp_set_class.define_method("patterns", method!(FastRegexpSet::patterns, 0))?;
+
+    // Magnus caches these classes and disables their allocators on first use.
+    // Complete that setup here, before workers can construct native objects.
+    FastRegexp::class(ruby);
+    FastMatchData::class(ruby);
+    FastRegexpSet::class(ruby);
 
     Ok(())
 }
