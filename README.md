@@ -236,6 +236,12 @@ Fast::Regexp::Set.new(['\w', '\d', '\s'], unicode: false).match("ю٤\u2000")
 # => []
 ```
 
+## Ractors
+
+Patterns, sets, and match results support `Ractor.make_shareable`. Workers
+can load `fast_regexp`, create their own patterns, or use a shared pattern
+concurrently.
+
 ## Documentation
 
 In-depth docs live under [`docs/`](docs/README.md), organized via the

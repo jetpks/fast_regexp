@@ -3,6 +3,18 @@
 All notable changes to this gem are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased]
+
+### Added
+
+- Ractor support: the native extension can run in parallel Ractors, and
+  patterns, sets, and match results support `Ractor.make_shareable`.
+
+### Fixed
+
+- Stdlib-backed patterns can perform substitutions after being frozen or
+  made Ractor-shareable, without first warming their replacement cache.
+
 ## [0.8.0] - 2026-10-30
 
 ### Changed

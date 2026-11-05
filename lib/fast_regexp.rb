@@ -157,6 +157,10 @@ module Fast
       raise ArgumentError, "backend must be one of #{BACKENDS.inspect}" unless BACKENDS.include?(backend)
       @pattern = pattern
       @backend = compile_backend(pattern, original, backend, opts)
+      if stdlib?
+        # Prepare $N-to-name translation before the pattern can be frozen.
+        @stdlib_name_by_index = @backend.named_captures.flat_map { |n, idxs| idxs.map { |i| [i, n] } }.to_h.freeze
+      end
     end
 
     def fast? = @backend.is_a?(Native)
@@ -300,13 +304,6 @@ module Fast
       raise(fallback_from ? ArgumentError.new(fallback_from.message) : e)
     end
 
-    # Maps positional capture indices to names for the stdlib backend so we
-    # can translate `$N` to `\k<name>` (Ruby's gsub ignores `\N` for named
-    # groups). Only invoked from the stdlib path.
-    def stdlib_name_by_index
-      @stdlib_name_by_index ||= @backend.named_captures.flat_map { |n, idxs| idxs.map { |i| [i, n] } }.to_h
-    end
-
     # Translate rust/regex replacement syntax ($N, ${name}, $$) into Ruby
     # syntax (\N, \k<name>, $) for the stdlib fallback path.
     def stdlib_replacement(template, literal)
@@ -317,7 +314,7 @@ module Fast
         case token
         when "$" then "$"
         when /\A\d+\z/
-          name = stdlib_name_by_index[token.to_i]
+          name = @stdlib_name_by_index[token.to_i]
           name ? "\\k<#{name}>" : "\\#{token}"
         else "\\k<#{token[1..-2]}>"
         end

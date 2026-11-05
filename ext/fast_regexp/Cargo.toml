@@ -8,4 +8,5 @@ crate-type = ["cdylib"]
 
 [dependencies]
 magnus = "0.8"
+rb-sys = "0.9"
 regex = "1"
