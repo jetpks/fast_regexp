@@ -28,9 +28,10 @@ them. Most read-only call sites work unchanged.
 | `=== "str"`            | same                          | Works in `case`/`when`. |
 | `match("str")`         | same                          | Returns `Fast::Regexp::MatchData` or `nil`. |
 | `match?("str")`        | same                          | |
-| `"str".scan(re)`       | `re.scan("str")`              | Same return shape. |
+| `"str".scan(re)`       | `re.scan("str")`              | Same return shape, on either engine. |
 | `"str".sub(re, repl)`  | `re.sub("str", repl)`         | **Template syntax is rust-style** (`$1`, `${name}`). |
 | `"str".gsub(re, repl)` | `re.gsub("str", repl)`        | Same as `sub`. |
+| `m.byteoffset(key)`    | same                          | `[begin, end]` in bytes for known keys; an unknown group name or out-of-range index returns `[nil, nil]` on the rust/regex path but raises `IndexError` on the stdlib-fallback path. |
 | `re.source`            | `re.pattern`                  | Returns the (possibly translated) source string. |
 
 ## Replacement template changes
@@ -70,7 +71,7 @@ same. See [Engine fallback architecture](../explainers/engine-fallback.md).
 
 After migrating, run your test suite and confirm:
 
-- Replacement strings still produce expected output (template syntax!).
+- Replacement strings still produce expected output (template syntax).
 - `=~`-based offset comparisons still make sense if your strings contain
   multibyte characters — `Fast::Regexp#=~` returns bytes, not characters.
 
@@ -80,5 +81,11 @@ After migrating, run your test suite and confirm:
   `str[m.byte_begin(0)..m.byte_end(0)]` you're fine, but
   `str[m.begin(0)..m.end(0)]` (character offsets) is not supported on the
   fast path.
+- `MatchData#byteoffset`, `#byte_begin`, and `#byte_end` answer unknown
+  group names and out-of-range indices differently per engine: the
+  rust/regex path returns `[nil, nil]` / `nil`, the stdlib-fallback path
+  raises `IndexError`. See the
+  [MatchData reference](../reference/fast-regexp-matchdata.md) for the full
+  contract.
 - `Fast::Regexp::Set` has no stdlib equivalent — multi-pattern matching
   there is a rust/regex-only feature.

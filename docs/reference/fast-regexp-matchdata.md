@@ -22,9 +22,9 @@ Returns a capture as a String, or `nil` if the group did not participate or
 the index/name is unknown.
 
 `key` may be an `Integer` (including negative indices), `String`, or
-`Symbol` naming a capture, or anything that converts to an Integer (a
-Float truncates), as with `::MatchData#[]`. Any other key raises
-`TypeError`.
+`Symbol` naming a capture, or anything that converts to an Integer (a Float
+truncates) or to a String via `to_str`, as `::MatchData#[]` allows. Any
+other key raises `TypeError`.
 
 ### `#to_a → Array<String | nil>`
 
@@ -36,15 +36,18 @@ All captures *excluding* the whole match.
 
 ### `#named_captures → Hash<String, String | nil>`
 
-Named captures in declaration order.
+Named captures in declaration order; non-participating named groups are
+present with `nil` values.
 
 ### `#names → Array<String>`
 
-Capture group names in declaration order.
+Capture group names in declaration order. On the fast path the strings are
+interned and frozen.
 
 ### `#values_at(*indices) → Array<String | nil>`
 
-Captures at the given indices/names.
+Captures at the given indices/names (defined on the façade, works on both
+paths via `#[]`).
 
 ### `#size → Integer`
 
@@ -71,21 +74,29 @@ the haystack itself when it was already frozen, otherwise a frozen
 copy-on-write sibling of it — so mutating the original afterwards changes
 nothing the match reads, the same guarantee `::MatchData#string` gives.
 
-### `#dup`, `#clone`
-
-A match is immutable; on the fast path both return the match itself.
-
 ### `#byteoffset(key) → [Integer, Integer] | [nil, nil]`
 
-`[start, end]` byte offsets of the named/indexed capture.
+`[start, end]` byte offsets of the named/indexed capture. **The two paths
+diverge on unknown keys**: the fast path returns `[nil, nil]` for an unknown
+group name, an out-of-range index, *and* a non-participating group; the
+stdlib path delegates to `::MatchData#byteoffset`, which raises `IndexError`
+for an unknown name or out-of-range index.
 
 ### `#byte_begin(key) → Integer | nil`
 
-Start byte offset of the capture.
+Start byte offset of the capture. Fast path: `nil` for an
+unknown/non-participating key; stdlib path: derived from `#byteoffset`, so
+unknown keys raise `IndexError` there.
 
 ### `#byte_end(key) → Integer | nil`
 
-End byte offset of the capture.
+End byte offset of the capture. Same per-path behavior as `#byte_begin`.
+
+### `#dup`, `#clone`
+
+On the fast path the match is immutable and has no allocator, so both
+return the match itself. On the stdlib path the wrapper is an ordinary
+unfrozen object and gets default `Object#dup`/`#clone` semantics.
 
 ## Backend escape hatches
 
@@ -122,6 +133,23 @@ Equal when both `#to_a` and `#string` match. Aliased as `#eql?`.
 
 ### `#hash → Integer`
 
+### `#inspect → String`
+
+`"#<Fast::Regexp::MatchData \"...\">"` on both paths.
+
+## Ractor safety
+
+- `Ractor.make_shareable` succeeds on matches from both paths and returns
+  the same object.
+- The frozen snapshot and the capture names stay valid after the original
+  haystack is mutated and GC runs with compaction — a shared match answers
+  exactly as it did when created.
+- Matches created inside non-main Ractors can be shared back out.
+
+Recipes live in [Use fast_regexp inside Ractors](../how-to/use-in-ractors.md);
+the [README's Ractors section](../../README.md#ractors) summarizes the
+guarantees.
+
 ## Examples
 
 ```ruby
@@ -139,3 +167,4 @@ m.post_match       # => ""
 
 - [`Fast::Regexp`](fast-regexp.md)
 - [Engine fallback architecture](../explainers/engine-fallback.md)
+- [Use fast_regexp inside Ractors](../how-to/use-in-ractors.md)

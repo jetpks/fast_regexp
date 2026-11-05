@@ -3,17 +3,22 @@
 All notable changes to this gem are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-## [Unreleased]
+## [0.9.0] - 2026-11-05
 
 ### Added
 
 - Ractor support: the native extension can run in parallel Ractors, and
   patterns, sets, and match results support `Ractor.make_shareable`.
 
+### Changed
+
+- Documentation pass: Ractor behavior documented across the reference pages; README prebuild matrix corrected to Ruby 3.4 and 4.0.
+
 ### Fixed
 
 - Stdlib-backed patterns can perform substitutions after being frozen or
   made Ractor-shareable, without first warming their replacement cache.
+- Fast::Regexp#scan on stdlib-fallback patterns no longer raises NoMethodError and returns the same results as the fast path.
 
 ## [0.8.0] - 2026-10-30
 

@@ -279,6 +279,28 @@ RSpec.describe Fast::Regexp do
     it "returns arrays of captures when there are capture groups" do
       expect(described_class.new('(\w):(\d)').scan("a:1 b:2")).to eq [["a", "1"], ["b", "2"]]
     end
+
+    it "returns matches as strings on stdlib-fallback patterns (no groups)" do
+      re = described_class.new('(?=\w)\w+', backend: :stdlib)
+      expect(re).to be_stdlib
+      expect(re.scan("a b c")).to eq ["a", "b", "c"]
+      expect(re.scan("a b c")).to eq described_class.new('\w+').scan("a b c")
+    end
+
+    it "returns arrays of captures on stdlib-fallback patterns" do
+      re = described_class.new('(?=\w:)(\w):(\d)', backend: :stdlib)
+      expect(re).to be_stdlib
+      expect(re.scan("a:1 b:2")).to eq [["a", "1"], ["b", "2"]]
+      expect(re.scan("a:1 b:2")).to eq described_class.new('(\w):(\d)').scan("a:1 b:2")
+    end
+
+    it "returns arrays of captures for named groups on stdlib-fallback patterns" do
+      re = described_class.new('(?=\w:)(?<letter>\w):(?<num>\d)', backend: :stdlib)
+      expect(re).to be_stdlib
+      expect(re.scan("a:1 b:2")).to eq [["a", "1"], ["b", "2"]]
+      expect(re.scan("a:1 b:2"))
+        .to eq described_class.new('(?<letter>\w):(?<num>\d)').scan("a:1 b:2")
+    end
   end
 
   describe "#scan_matches" do
@@ -287,6 +309,34 @@ RSpec.describe Fast::Regexp do
       expect(matches.length).to eq 2
       expect(matches.map { |m| m[0] }).to eq ["ruby:123", "rust:456"]
       expect(matches[1].byteoffset(0)).to eq [9, 17]
+    end
+
+    it "returns MatchData for each match on stdlib-fallback patterns (no groups)" do
+      re = described_class.new('(?=\w)\w+', backend: :stdlib)
+      expect(re).to be_stdlib
+      expect(re.scan_matches("a b c").map(&:to_a)).to eq [["a"], ["b"], ["c"]]
+      expect(re.scan_matches("a b c").map(&:to_a))
+        .to eq described_class.new('\w+').scan_matches("a b c").map(&:to_a)
+    end
+
+    it "returns MatchData with byteoffsets on stdlib-fallback patterns" do
+      re = described_class.new('(?=\w+:)(\w+):(\d+)', backend: :stdlib)
+      expect(re).to be_stdlib
+      matches = re.scan_matches("ruby:123 rust:456")
+      expect(matches).to all(be_a(Fast::Regexp::MatchData))
+      expect(matches.map { |m| m[0] }).to eq ["ruby:123", "rust:456"]
+      expect(matches[1].byteoffset(0)).to eq [9, 17]
+      expect(matches.map(&:to_a))
+        .to eq described_class.new('(\w+):(\d+)').scan_matches("ruby:123 rust:456").map(&:to_a)
+    end
+
+    it "returns MatchData exposing named captures on stdlib-fallback patterns" do
+      re = described_class.new('(?=\w:)(?<letter>\w):(?<num>\d)', backend: :stdlib)
+      expect(re).to be_stdlib
+      matches = re.scan_matches("a:1 b:2")
+      expect(matches.map { |m| [m[:letter], m[:num]] }).to eq [["a", "1"], ["b", "2"]]
+      expect(matches.map(&:to_a))
+        .to eq described_class.new('(?<letter>\w):(?<num>\d)').scan_matches("a:1 b:2").map(&:to_a)
     end
   end
 

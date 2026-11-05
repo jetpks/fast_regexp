@@ -37,6 +37,26 @@ order the matches appear in the haystack).
 
 The original pattern strings.
 
+## Ractor safety
+
+- `Ractor.make_shareable` succeeds on a Set and returns the same object —
+  one Set shared across workers answers correctly with a stable object
+  identity.
+- Sets can be constructed inside non-main Ractors, including as the first
+  use of the type after load.
+
+Recipes live in [Use fast_regexp inside Ractors](../how-to/use-in-ractors.md);
+the [README's Ractors section](../../README.md#ractors) summarizes the
+guarantees.
+
+## Caveats
+
+- Capture groups in member patterns are ignored — `Set` only reports *which*
+  patterns matched, not the matched substrings or groups. Use a
+  `Fast::Regexp` for capture extraction.
+- Cannot fall back to stdlib — Ruby's `::Regexp` has no native multi-pattern
+  equivalent.
+
 ## Examples
 
 ```ruby
@@ -48,14 +68,7 @@ set.match?("xyz")        # => false
 set.patterns             # => ["abc", "def", "ghi"]
 ```
 
-## Caveats
-
-- Capture groups in member patterns are ignored — `Set` only reports *which*
-  patterns matched, not the matched substrings or groups. Use a
-  `Fast::Regexp` for capture extraction.
-- Cannot fall back to stdlib — Ruby's `::Regexp` has no native multi-pattern
-  equivalent.
-
 ## Related
 
 - [`Fast::Regexp`](fast-regexp.md) — single-pattern matching with captures.
+- [Use fast_regexp inside Ractors](../how-to/use-in-ractors.md)

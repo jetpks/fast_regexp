@@ -4,14 +4,16 @@ type: tutorial
 
 # Getting started with `fast_regexp`
 
-**Goal:** install the gem, compile the native extension, and run your first
-match, substitution, and multi-pattern scan.
+**Goal:** install the gem and run your first match, substitution, and
+multi-pattern scan — compiling the extension only happens on platforms
+without a precompiled gem.
 
 **Prerequisites:**
 
-- Ruby 3.3 or newer
-- A working [Rust toolchain](https://rustup.rs/) (`cargo` on `PATH`)
+- Ruby 3.4 or newer
 - Bundler (`gem install bundler`)
+- A [Rust toolchain](https://rustup.rs/) (`cargo` on `PATH`) — only if your
+  platform doesn't get a precompiled gem (see below)
 
 ## 1. Install
 
@@ -27,8 +29,11 @@ gem "fast_regexp"
 bundle install
 ```
 
-The first install will compile the native extension. If you see "cargo:
-command not found", install Rust first.
+Precompiled native gems cover **arm64-darwin**, **x86_64-linux**, and
+**aarch64-linux** on Ruby **3.4** and **4.0** — on those combinations the
+install is a download, no Rust needed. Any other platform/Ruby combo
+installs the source gem and compiles the extension at install time; if you
+see "cargo: command not found" there, install Rust first.
 
 ## 2. Your first match
 
@@ -46,7 +51,7 @@ m.post_match    # => ", rust:456"
 ```
 
 `#match` returns a [`Fast::Regexp::MatchData`](../reference/fast-regexp-matchdata.md)
-on a hit, or `nil` on no match — same shape as Ruby's built-in `Regexp#match`.
+on a hit, or `nil` on no match — same shape as stdlib `::Regexp#match`.
 
 ## 3. Substitution
 
@@ -78,7 +83,7 @@ set.match?("xyz")        # => false
 
 ## 5. What if rust/regex doesn't support my pattern?
 
-It just works — `Fast::Regexp` transparently falls back to stdlib `::Regexp`
+It requires no setup — `Fast::Regexp` transparently falls back to stdlib `::Regexp`
 for features like lookaround and backreferences:
 
 ```ruby
@@ -96,3 +101,4 @@ for the "how to spot it."
 
 - [Migrate from stdlib `::Regexp`](../how-to/migrate-from-stdlib-regexp.md)
 - [`Fast::Regexp` reference](../reference/fast-regexp.md)
+- [Use fast_regexp inside Ractors](../how-to/use-in-ractors.md)
