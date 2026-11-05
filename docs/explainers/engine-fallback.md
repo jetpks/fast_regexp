@@ -62,7 +62,10 @@ the rest — pushes that complexity into every call site.
 **Callers see one type.** `is_a?(Fast::Regexp)` is true regardless of
 which engine ran. `MatchData` exposes the same `#[]`, `#captures`,
 `#named_captures`, `#pre_match`, `#post_match`, `#byteoffset` on both
-paths.
+paths — with one divergence: the `#byteoffset` family answers an unknown
+group name or out-of-range index with `[nil, nil]` (`nil` for
+`#byte_begin`/`#byte_end`) on the fast path and raises `IndexError` on the
+stdlib path ([MatchData reference](../reference/fast-regexp-matchdata.md)).
 
 **Replacement template syntax is unified.** `sub`/`gsub` use rust-style
 templates (`$1`, `${name}`, `$$`) on both paths — the stdlib path
@@ -78,6 +81,11 @@ detailed) error message.
 stable for the life of the `Fast::Regexp`. There's no per-call decision —
 the decision is at compile time. You can assert "this hot-path pattern is
 on rust/regex" with `expect(re).to be_fast` in a test.
+
+**The fallback choice doesn't affect Ractor behavior.** A stdlib-backed
+pattern can be frozen or made `Ractor.make_shareable` like a rust-backed
+one, and substitutes correctly from any worker afterwards
+([README — Ractors](../../README.md#ractors)).
 
 **`Fast::Regexp::Set` does not fall back.** Multi-pattern matching is a
 rust/regex feature with no stdlib equivalent. `Set.new` raises on any

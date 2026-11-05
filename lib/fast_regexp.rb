@@ -197,7 +197,9 @@ module Fast
     end
 
     def scan(haystack)
-      @backend.scan(coerce_string(haystack))
+      haystack = coerce_string(haystack)
+      return @backend.scan(haystack) if fast?
+      haystack.scan(@backend)
     end
 
     def scan_matches(haystack)

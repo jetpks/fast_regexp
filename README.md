@@ -20,7 +20,7 @@ gem install fast_regexp
 ```
 
 Precompiled native gems are published for **arm64-darwin**, **x86_64-linux**,
-and **aarch64-linux** against Ruby **3.3**, **3.4**, and **4.0** — no Rust
+and **aarch64-linux** against Ruby **3.4** and **4.0** — no Rust
 toolchain required on those platforms.
 
 On any other platform/Ruby combo, Bundler/RubyGems falls back to the source
@@ -39,7 +39,7 @@ Regular expressions should be pre-compiled before use:
 
 ```ruby
 re = Fast::Regexp.new('p.t{2}ern*')
-# => #<Fast::Regexp:...>
+# => #<Fast::Regexp "p.t{2}ern*">
 ```
 
 > [!TIP]
@@ -100,6 +100,9 @@ Fast::Regexp.new('\w+:\d+').scan("ruby:123, rust:456")
 Fast::Regexp.new('(\w+):(\d+)').scan("ruby:123, rust:456")
 # => [["ruby", "123"], ["rust", "456"]]
 ```
+
+Both `#scan` and `#scan_matches` run on either engine and return identical
+results, including on patterns that fell back to stdlib `::Regexp`.
 
 For per-match positions and pre/post-match access, use `#scan_matches`:
 
@@ -216,13 +219,28 @@ Fast::Regexp::Set.new(["abc", "def"]).patterns
 
 ## Encoding
 
-Currently, `fast_regexp` expects the haystack to be an UTF-8 string.
-
-It also supports parsing of strings with invalid UTF-8 characters by default. It's achieved via using `regex::bytes` instead of plain `regex` under the hood, so any byte sequence can be matched. The output match is encoded as UTF-8 string.
-
-In case unicode awarness of matchers should be disabled, both `Fast::Regexp` and `Fast::Regexp::Set` support `unicode: false` option:
+`fast_regexp` expects UTF-8 haystacks — ASCII-8BIT strings work too, and match
+results always come back tagged UTF-8. Matching runs over the raw bytes
+(rust/regex's `regex::bytes`), so searching a haystack that contains invalid
+UTF-8 doesn't raise, where stdlib raises `ArgumentError`:
 
 ```ruby
+"abc\xFFdef" =~ /a(.)c/
+# => ArgumentError: invalid byte sequence in UTF-8
+
+Fast::Regexp.new('a(.)c').match("abc\xFFdef")
+# => #<Fast::Regexp::MatchData "abc">
+```
+
+In the default Unicode-aware mode a `.` or character class won't match
+*across* an invalid byte. To match bytes anywhere, disable Unicode
+awareness — both `Fast::Regexp` and `Fast::Regexp::Set` accept `unicode:`
+(default `true`):
+
+```ruby
+Fast::Regexp.new('c(.)d', unicode: false).match("abc\xFFdef").to_a
+# => ["c\xFFd", "\xFF"]
+
 Fast::Regexp.new('\w+').match('ю٤夏')[0]
 # => "ю٤夏"
 
@@ -238,9 +256,47 @@ Fast::Regexp::Set.new(['\w', '\d', '\s'], unicode: false).match("ю٤\u2000")
 
 ## Ractors
 
-Patterns, sets, and match results support `Ractor.make_shareable`. Workers
-can load `fast_regexp`, create their own patterns, or use a shared pattern
-concurrently.
+Patterns, sets, and match results support `Ractor.make_shareable` — it
+returns the same object, now frozen. The native extension declares itself
+Ractor-safe at load time, so there is nothing to enable:
+
+```ruby
+re = Ractor.make_shareable(Fast::Regexp.new('(?P<word>\w+)=(?P<num>\d+)'))
+
+workers = Array.new(4) do
+  Ractor.new(re) do |pattern|
+    pattern.match("a=1 b=2")[:word]   # => "a"
+  end
+end
+workers.map { |r| r.respond_to?(:value) ? r.value : r.take }
+# => ["a", "a", "a", "a"]
+```
+
+Ruby 3.4 reads a Ractor's result with `#take`; Ruby 4.0 replaced it with
+`#value`. The `respond_to?` read above runs on both — the same idiom the
+spec suite uses.
+
+What is guaranteed (each point pinned by
+[`spec/fast_regexp/ractor_spec.rb`](spec/fast_regexp/ractor_spec.rb)):
+
+- A shared pattern is fully usable in every worker: `match`, `match?`,
+  `===`, `=~`, `scan`, `scan_matches`, and `sub`/`gsub` in template and
+  block form all work, with the same results as on the main Ractor.
+- Workers can `require "fast_regexp"` concurrently, including as the gem's
+  first load, and can construct their own patterns, matches, and sets —
+  the first construction of every native type works inside a non-main
+  Ractor.
+- Matches are frozen snapshots: the haystack is snapshotted at match time,
+  so mutating it afterwards and then running GC with compaction leaves a
+  shared match's data intact. `MatchData#string` returns that snapshot.
+- Stdlib-fallback patterns are shareable too, and substitute correctly
+  after being frozen or made shareable, without any warm-up call.
+
+Recipes: [Use fast_regexp inside Ractors](docs/how-to/use-in-ractors.md).
+Per-class details: the "Ractor safety" sections of
+[`Fast::Regexp`](docs/reference/fast-regexp.md),
+[`MatchData`](docs/reference/fast-regexp-matchdata.md), and
+[`Set`](docs/reference/fast-regexp-set.md).
 
 ## Documentation
 
@@ -248,20 +304,26 @@ In-depth docs live under [`docs/`](docs/README.md), organized via the
 [Diátaxis](https://diataxis.fr/) framework:
 
 - **Tutorial:** [Getting started](docs/tutorials/getting-started.md)
-- **How-to:** [Migrate from stdlib `::Regexp`](docs/how-to/migrate-from-stdlib-regexp.md), [Handle unsupported syntax](docs/how-to/handle-unsupported-syntax.md)
+- **How-to:** [Migrate from stdlib `::Regexp`](docs/how-to/migrate-from-stdlib-regexp.md), [Handle unsupported syntax](docs/how-to/handle-unsupported-syntax.md), [Use fast_regexp inside Ractors](docs/how-to/use-in-ractors.md)
 - **Reference:** [`Fast::Regexp`](docs/reference/fast-regexp.md), [`MatchData`](docs/reference/fast-regexp-matchdata.md), [`Set`](docs/reference/fast-regexp-set.md)
 - **Explainers:** [Engine fallback](docs/explainers/engine-fallback.md), [Benchmarks](docs/explainers/benchmarks.md)
 
 ## Performance
 
-Matching runs 8–10x stdlib `::Regexp` on a hit or a miss, scanning 2–5x,
-`gsub` with a template 7–13x; reading a `MatchData` costs the same objects
-as `::MatchData`, and `match?`, `=~`, `===` and `Set#match?` allocate
-nothing. Compiling a pattern is the one place rust/regex is slower (it
-builds its automaton up front), so compile once and keep the object. Every
-operation, with the stdlib equivalent beside it, is on the
-[benchmarks page](docs/explainers/benchmarks.md); reproduce with
-`bundle exec ruby benchmark/operations.rb`.
+Measured with `bundle exec ruby benchmark/operations.rb` — one run on
+2026-11-05, Apple M4 Max, `ruby 4.0.9`, fast_regexp 0.9.0 (the full table is
+on the [benchmarks page](docs/explainers/benchmarks.md)):
+
+- `match?` runs 8–9x stdlib `::Regexp`, on a hit and on a 200 KB miss;
+  `scan` 2–5x; `gsub` with a template 7x on a 200 KB haystack — in one
+  object, where stdlib allocates a `String` per match. `Set#match?` over
+  four patterns is 2x a `Regexp.union`.
+- Reading a `MatchData` costs the same objects as `::MatchData`: each
+  accessor allocates exactly what it returns. `match?`, `=~`, `===` and
+  `Set#match?` allocate nothing.
+- Compiling a pattern is the one place rust/regex is slower: it builds its
+  automaton up front (~256 µs for a small pattern in that run, against
+  stdlib's ~1 µs), so compile once and keep the object.
 
 ## Development
 

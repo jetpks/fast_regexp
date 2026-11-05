@@ -84,6 +84,16 @@ RSpec.describe "regex hot path" do
 end
 ```
 
+### Engine coverage of the public API
+
+Every public method works on both paths — including `#scan` and
+`#scan_matches`, which return identical results on either engine. The one
+behavioral divergence is in the `MatchData#byteoffset` family: unknown
+group names and out-of-range indices return `[nil, nil]` (`nil` for
+`#byte_begin`/`#byte_end`) on the rust/regex path and raise `IndexError` on
+the stdlib-fallback path. See the
+[MatchData reference](../reference/fast-regexp-matchdata.md).
+
 ## Detect unsupported patterns at boot
 
 If you'd rather know up-front:
@@ -105,3 +115,6 @@ This is purely informational — fallback patterns still work correctly.
   pattern relies on rust-specific syntax *and* a feature rust/regex doesn't
   support, you'll get a compile error from `::Regexp` instead. Rewrite for
   one engine or the other.
+- A pattern on the stdlib fallback still works under Ractors: it can be
+  frozen or made shareable and used from any worker. See
+  [Use fast_regexp inside Ractors](use-in-ractors.md).
